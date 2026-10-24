@@ -22,7 +22,7 @@ services:
   openshell-gateway:
     depends_on: [squid]
     environment:
-      # The gateway's own traffic (e.g. the upstream probe on `inference set`) goes through squid.
+      # The gateway's own traffic goes through squid.
       HTTPS_PROXY: http://squid:3128
       HTTP_PROXY: http://squid:3128
       NO_PROXY: localhost,127.0.0.1,host.openshell.internal,host.docker.internal

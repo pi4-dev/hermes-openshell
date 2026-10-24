@@ -10,19 +10,20 @@ The [Hermes](https://github.com/NousResearch/hermes-agent) agent (NousResearch) 
 ```
 Hermes (sandbox) ──▶ OpenShell supervisor proxy ──▶ [Squid (whitelist)] ──▶ internet / model API
                      (per-binary policy,              optional
-                      inference.local + key outside the sandbox)
+                      placeholder -> real API key)
 ```
 
-- Hermes sends requests only to `https://inference.local/v1`. OpenShell swaps in the model and injects the real key, which the sandbox never sees.
+- Hermes calls the model backend's native OpenAI-compatible API (`MODEL_BASE_URL`, `MODEL_NAME`). The API key is stored in an OpenShell provider. The sandbox sees only a placeholder in `MODEL_API_KEY`, and OpenShell replaces it with the real key on requests to the backend host.
+- Bootstrap generates a provider profile (`hermes-model`) from `MODEL_BASE_URL`. It allows that one host, for the sandbox's Python only, and the provider is attached to the sandbox.
 - The Hermes sandbox container is not a compose service. The gateway creates it via `docker.sock`.
-- Without the upstream proxy, egress is controlled only by the OpenShell policy (`policy/hermes-policy.yaml`, per binary).
+- Without the upstream proxy, egress is controlled only by OpenShell (`policy/hermes-policy.yaml` plus the provider's rule, per binary).
 
 ### Optional upstream proxy (Squid)
 
 The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` line in `.env`, which is on in `.env.example`. Comment it out to run without Squid.
 
 - `HTTPS_PROXY` inside the sandbox does not work by design, because the supervisor rewrites the agent's proxy environment. Squid is therefore wired in as the supervisor's upstream via `[openshell.drivers.docker] https_proxy` in `openshell/gateway.proxy.toml`.
-- Access goes through two independent gates. A host must be **both** in `policy/hermes-policy.yaml` (OpenShell, per binary) and in `squid/whitelist.txt` (Squid, per domain).
+- Access goes through two independent gates. A host must be **both** allowed by OpenShell (`policy/hermes-policy.yaml`, or the provider profile for the model backend; per binary) and in `squid/whitelist.txt` (Squid, per domain).
 - The gateway's own traffic and the image builds (`pip`, `git`) also go through Squid.
 - `firewall.sh` can additionally block direct container egress, so that Squid is the only way out.
 
@@ -33,8 +34,8 @@ The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.prox
 | `openshell/gateway.toml` | docker driver, bridge network mode (without the proxy) |
 | `openshell/gateway.proxy.toml` | the same plus the supervisor's upstream proxy (used with the proxy) |
 | `squid/` | config and domain whitelist |
-| `hermes/` | Hermes sandbox image and `config.yaml` (model -> inference.local) |
-| `bootstrap/` | one-off setup: gateway registration, provider, inference routing, sandbox |
+| `hermes/` | Hermes sandbox image and `config.yaml` (model from `MODEL_BASE_URL`/`MODEL_NAME`, key from `MODEL_API_KEY`) |
+| `bootstrap/` | one-off setup with the OpenShell CLI: gateway registration, model provider profile and provider, sandbox |
 | `policy/hermes-policy.yaml` | OpenShell policy (filesystem, process, network) |
 | `firewall.sh` | DOCKER-USER rules: containers leave only through squid (proxy only) |
 
@@ -64,20 +65,29 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
 7. **Start the gateway.**
    ```
    docker compose up -d openshell-gateway
-   curl -sf http://127.0.0.1:8080/healthz
+   curl -sf http://127.0.0.1:8081/healthz
    ```
    The port must be 8080 on both sides, because sandboxes call back to `host.openshell.internal:8080`.
    Compose first runs `openshell-init`, which writes the sandbox JWT keys to `/var/lib/openshell/tls`. The Docker driver requires them. The gateway keeps its database, keys and the extracted supervisor binary in `/var/lib/openshell` on the host and runs as root, like the `deploy/docker` setup in the OpenShell repo.
 
-8. **Bootstrap:** `docker compose up bootstrap`. The script registers the gateway, creates the provider, sets up inference routing and creates the sandbox. To run it again: `docker compose run --rm bootstrap`.
+8. **Bootstrap:** `docker compose up bootstrap`. The script registers the gateway, imports the model provider profile, creates the provider with the key and creates the sandbox with the provider attached. To run it again: `docker compose run --rm bootstrap`. A rerun updates the profile and the key and leaves an existing sandbox alone. Processes that are already running (Hermes keeps a background `hermes gateway run`) keep the old key until they restart, so after a key change run `openshell sandbox stop hermes` and `openshell sandbox start hermes`.
 
-9. **Working with Hermes** (CLI on the host, same version as the gateway: `uv tool install openshell`):
+9. **Working with Hermes.** Install the OpenShell CLI on the host, in the same version as the gateway. The `openshell` package on PyPI is only the Python SDK, and the upstream `install.sh` also sets up its own local gateway, so take the static binary from the release:
+   ```
+   V=0.1.5
+   A=openshell-$(uname -m)-unknown-linux-musl.tar.gz
+   curl -fsSLO https://github.com/NVIDIA/OpenShell/releases/download/v$V/$A
+   curl -fsSLO https://github.com/NVIDIA/OpenShell/releases/download/v$V/openshell-checksums-sha256.txt
+   grep " $A\$" openshell-checksums-sha256.txt | sha256sum -c
+   sudo tar -xzf $A -C /usr/local/bin openshell
+   ```
+   Then:
    ```
    openshell gateway add http://127.0.0.1:8080 --name local
    openshell sandbox connect hermes
    hermes
    ```
-   For continuous operation (Telegram, Slack, API), set `HERMES_CMD=hermes gateway run` and recreate the sandbox.
+   `sandbox connect` uses the host's `ssh` client. For continuous operation (Telegram, Slack, API), set `HERMES_CMD=hermes gateway run` and recreate the sandbox (`openshell sandbox delete hermes`, then the bootstrap again).
 
 ### Switching modes later
 
@@ -88,13 +98,14 @@ Then run `docker compose up -d openshell-gateway` (compose recreates the gateway
 
 ## Verification
 
-- In the sandbox: `curl https://inference.local/v1/models` should get a response from the model backend.
+- In the sandbox: `hermes -z "ping"` should get an answer from the model backend.
+- `openshell policy get hermes --full` shows the provider's rule for the model backend host.
 - A host outside the policy should be rejected by OpenShell.
-- **(proxy)** Squid log: `docker compose exec squid tail -f /var/log/squid/access.log`. After the request to `inference.local`, `CONNECT <model-host>:443` should show up in it.
+- **(proxy)** Squid log: `docker compose exec squid tail -f /var/log/squid/access.log`. After a request from Hermes, `CONNECT <model-host>:443` should show up in it.
 - **(proxy)** A host allowed by the policy but missing from the whitelist should give `TCP_DENIED` in squid.
 
 ## To check against the pinned OpenShell version
 
 - Installing Hermes on the `openshell-community/sandboxes/base` image: `uv sync --frozen` from the `uv.lock` of the `HERMES_REF` checkout (plain pip cannot resolve hermes-agent's dependencies). The lock covers only Python 3.14, the base image's version. Pin `HERMES_REF`.
-- `CERTIFICATE_VERIFY_FAILED` error with `inference.local`: set `SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem` in the sandbox.
+- The provider profile and the policy name the binary `/sandbox/.uv/python/**`, the real path of the base image's Python (`/usr/local/bin/python3` is a symlink to it). After changing the base image, check `readlink -f "$(command -v python3)"` in the sandbox and adjust `bootstrap/model-profile.py` and the policy.
 - **(proxy)** `proxy_connect_by_hostname = true` is required, because otherwise CONNECT goes to the IP and `dstdomain` in squid does not match.
