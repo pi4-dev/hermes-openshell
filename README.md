@@ -95,6 +95,6 @@ Then run `docker compose up -d openshell-gateway` (compose recreates the gateway
 
 ## To check against the pinned OpenShell version
 
-- Installing Hermes via pip from git on the `openshell-community/sandboxes/base` image. Pin `HERMES_REF`.
+- Installing Hermes on the `openshell-community/sandboxes/base` image: `uv sync --frozen` from the `uv.lock` of the `HERMES_REF` checkout (plain pip cannot resolve hermes-agent's dependencies). The lock covers only Python 3.14, the base image's version. Pin `HERMES_REF`.
 - `CERTIFICATE_VERIFY_FAILED` error with `inference.local`: set `SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem` in the sandbox.
 - **(proxy)** `proxy_connect_by_hostname = true` is required, because otherwise CONNECT goes to the IP and `dstdomain` in squid does not match.
