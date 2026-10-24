@@ -1,7 +1,7 @@
 name: hermes-openshell
 
-# Base stack: OpenShell gateway (docker driver) + its one-off init (JWT keys) + Hermes sandbox image
-# + one-off bootstrap (provider, inference routing, sandbox).
+# Base stack: OpenShell gateway (docker driver) + its one-off init (JWT keys) + model relay
+# + Hermes sandbox image + one-off bootstrap (sandbox).
 # The upstream proxy (squid) is optional and lives in docker-compose.proxy.yml,
 # enabled through COMPOSE_FILE in .env (see README).
 # The Hermes sandbox container is NOT a compose service — the gateway creates it via docker.sock.
@@ -60,6 +60,20 @@ services:
       - ./openshell/gateway.toml:/etc/openshell/gateway.toml:ro
       - *openshell-data
 
+  # OpenAI-compatible relay in front of the model backend. It holds the API key, the endpoint and
+  # the real model name, so Hermes only knows the relay's address and the model alias.
+  model-relay:
+    build: ./model-relay
+    restart: unless-stopped
+    networks: [osnet]
+    ports:
+      # Sandboxes reach it as host.docker.internal:8082 (docker0); not exposed on 0.0.0.0.
+      - "${HOST_BRIDGE_IP}:8082:8000"
+    environment:
+      MODEL_BASE_URL: ${MODEL_BASE_URL}
+      MODEL_API_KEY: ${MODEL_API_KEY}
+      MODEL_NAME: ${MODEL_NAME}
+
   # Only builds the hermes-sandbox:local image.
   hermes-image:
     image: hermes-sandbox:local
@@ -78,15 +92,14 @@ services:
     depends_on:
       openshell-gateway:
         condition: service_started
+      model-relay:
+        condition: service_started
       hermes-image:
         condition: service_completed_successfully
     networks: [osnet]
     restart: "no"
     environment:
       NO_PROXY: openshell-gateway
-      MODEL_BASE_URL: ${MODEL_BASE_URL}
-      MODEL_API_KEY: ${MODEL_API_KEY}
-      MODEL_NAME: ${MODEL_NAME}
       SANDBOX_NAME: ${SANDBOX_NAME}
       HERMES_CMD: ${HERMES_CMD}
     volumes:

@@ -17,9 +17,11 @@ RUN python3 -m venv /tmp/uv \
  && cd /opt/hermes \
  && UV_NO_CACHE=1 UV_LINK_MODE=copy UV_PYTHON_DOWNLOADS=never \
     /tmp/uv/bin/uv sync --frozen --no-dev --compile-bytecode \
- && rm -rf /opt/hermes/.git /tmp/uv \
- && ln -sf /opt/hermes/.venv/bin/hermes /usr/local/bin/hermes
+ && rm -rf /opt/hermes/.git /tmp/uv
 
+# `hermes` starts Hermes without the sandbox runtime's markers in its environment.
+COPY --chmod=755 hermes-launcher.sh /usr/local/bin/hermes
+# Points only at the model relay, under a model alias; no comments, Hermes can read this file.
 COPY --chown=sandbox:sandbox config.yaml /sandbox/.hermes/config.yaml
 ENV HERMES_HOME=/sandbox/.hermes
 

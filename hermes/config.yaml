@@ -1,9 +1,6 @@
-# Hermes calls the model backend's native OpenAI-compatible API. bootstrap passes MODEL_BASE_URL
-# and MODEL_NAME to the sandbox; MODEL_API_KEY holds only a placeholder, which OpenShell replaces
-# with the real key outside the sandbox, on requests to that host.
 model:
   provider: custom
-  base_url: ${env:MODEL_BASE_URL}
-  key_env: MODEL_API_KEY
-  default: ${env:MODEL_NAME}
-  context_length: 131072   # set to the model's real context window
+  base_url: http://host.docker.internal:8082/v1
+  api_key: local
+  default: assistant
+  context_length: 131072

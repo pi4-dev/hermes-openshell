@@ -30,6 +30,13 @@ services:
       # Replaces the base gateway.toml (same target): adds the supervisor's upstream proxy.
       - ./openshell/gateway.proxy.toml:/etc/openshell/gateway.toml:ro
 
+  # The relay reaches the model backend through squid.
+  model-relay:
+    depends_on: [squid]
+    environment:
+      HTTPS_PROXY: http://squid:3128
+      HTTP_PROXY: http://squid:3128
+
   # pip and git in the builds go through squid — build AFTER starting squid (see README).
   hermes-image:
     build:
