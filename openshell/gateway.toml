@@ -1,3 +1,5 @@
+# Gateway config without the upstream proxy. With the proxy enabled, docker-compose.proxy.yml
+# mounts gateway.proxy.toml in its place — keep the settings shared by both files in sync.
 [openshell]
 version = 2
 
@@ -6,17 +8,10 @@ compute_driver = "docker"
 
 [openshell.drivers.docker]
 socket_path = "/var/run/docker.sock"
-# bridge zamiast domyślnego host: ruch supervisora przechodzi przez FORWARD/DOCKER-USER,
-# więc firewall może wymusić "tylko przez squid".
+# bridge instead of the default host: supervisor traffic goes through FORWARD/DOCKER-USER,
+# so in proxy mode the firewall can enforce "squid only".
 supervisor_network_mode = "bridge"
 
-# Cały egress sandboxów (także routowane inference.local) -> squid na docker0.
-# TOML nie interpoluje .env — wpisz to samo IP co HOST_BRIDGE_IP.
-https_proxy = "http://172.17.0.1:3128"
-no_proxy = "host.openshell.internal,host.docker.internal,localhost,127.0.0.1"
-# Bez tego supervisor robi CONNECT na rozwiązany adres IP i dstdomain w squidzie nie zadziała.
-proxy_connect_by_hostname = true
-
-# Obraz hermes-sandbox:local istnieje tylko lokalnie — ustaw politykę pull tak, by go nie ściągać
-# (dozwolone wartości sprawdź w Gateway Config reference swojej wersji) albo wypchnij do lokalnego registry.
+# The hermes-sandbox:local image exists only locally — set the pull policy so it is not pulled
+# (check the allowed values in the Gateway Config reference for your version) or push it to a local registry.
 # image_pull_policy = "..."

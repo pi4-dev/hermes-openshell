@@ -1,0 +1,47 @@
+# Optional upstream proxy: squid becomes the only way out to the internet
+# (sandbox egress including inference, the gateway's own traffic, image builds).
+# Merged on top of docker-compose.yml when .env contains
+#   COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml
+
+services:
+  squid:
+    image: ubuntu/squid:latest            # pin a specific tag in production
+    restart: unless-stopped
+    networks:
+      osnet:
+        ipv4_address: 172.30.0.10         # fixed address -> DOCKER-USER firewall rule
+    ports:
+      # Published only on the docker0 bridge IP: reachable from sandbox containers,
+      # from image build containers and from the host, but not from the LAN.
+      - "${HOST_BRIDGE_IP}:3128:3128"
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./squid/whitelist.txt:/etc/squid/whitelist.txt:ro
+      - squid-logs:/var/log/squid
+
+  openshell-gateway:
+    depends_on: [squid]
+    environment:
+      # The gateway's own traffic (e.g. the upstream probe on `inference set`) goes through squid.
+      HTTPS_PROXY: http://squid:3128
+      HTTP_PROXY: http://squid:3128
+      NO_PROXY: localhost,127.0.0.1,host.openshell.internal,host.docker.internal
+    volumes:
+      # Replaces the base gateway.toml (same target): adds the supervisor's upstream proxy.
+      - ./openshell/gateway.proxy.toml:/etc/openshell/gateway.toml:ro
+
+  # pip and git in the builds go through squid — build AFTER starting squid (see README).
+  hermes-image:
+    build:
+      args:
+        HTTP_PROXY: http://${HOST_BRIDGE_IP}:3128
+        HTTPS_PROXY: http://${HOST_BRIDGE_IP}:3128
+
+  bootstrap:
+    build:
+      args:
+        HTTP_PROXY: http://${HOST_BRIDGE_IP}:3128
+        HTTPS_PROXY: http://${HOST_BRIDGE_IP}:3128
+
+volumes:
+  squid-logs:
