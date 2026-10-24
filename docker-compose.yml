@@ -1,17 +1,41 @@
 name: hermes-openshell
 
-# Base stack: OpenShell gateway (docker driver) + Hermes sandbox image
+# Base stack: OpenShell gateway (docker driver) + its one-off init (JWT keys) + Hermes sandbox image
 # + one-off bootstrap (provider, inference routing, sandbox).
 # The upstream proxy (squid) is optional and lives in docker-compose.proxy.yml,
 # enabled through COMPOSE_FILE in .env (see README).
 # The Hermes sandbox container is NOT a compose service — the gateway creates it via docker.sock.
 
 services:
+  # One-off: writes the sandbox JWT signing keys to /var/lib/openshell/tls (existing keys are kept).
+  # The docker driver requires them.
+  openshell-init:
+    image: ghcr.io/nvidia/openshell/gateway:${OPENSHELL_GATEWAY_TAG}
+    user: "0"
+    restart: "no"
+    command: ["generate-certs", "--output-dir", "/var/lib/openshell/tls"]
+    environment:
+      HOME: /var/lib/openshell
+    volumes:
+      - &openshell-data
+        # Same path on the host and in the container (the supervisor binary is bind-mounted into sandboxes).
+        type: bind
+        source: /var/lib/openshell
+        target: /var/lib/openshell
+        bind:
+          create_host_path: true
+
   openshell-gateway:
     image: ghcr.io/nvidia/openshell/gateway:${OPENSHELL_GATEWAY_TAG}
     restart: unless-stopped
+    depends_on:
+      openshell-init:
+        condition: service_completed_successfully
     networks: [osnet]
-    group_add: ["${DOCKER_GID}"]          # access to /var/run/docker.sock without root
+    # The image runs as UID 1000, but dockerd creates /var/lib/openshell on the host as root,
+    # so the gateway could not create its database there. Root also covers docker.sock access,
+    # which is root-equivalent on the host anyway (same as deploy/docker in the OpenShell repo).
+    user: "0"
     ports:
       # Sandboxes call back to host.openshell.internal:8080 -> the port MUST be 8080 on both sides.
       # TLS is disabled = no auth, so it is not exposed on 0.0.0.0.
@@ -24,19 +48,16 @@ services:
       OPENSHELL_COMPUTE_DRIVER: docker
       OPENSHELL_DB_URL: sqlite:/var/lib/openshell/openshell.db
       OPENSHELL_DISABLE_TLS: "true"
-      # Name of the variable/flag pointing to the TOML file -> compare with deploy/docker/docker-compose.yml
-      # in the NVIDIA/OpenShell repo for the pinned version.
       OPENSHELL_GATEWAY_CONFIG: /etc/openshell/gateway.toml
+      # The extracted supervisor binary ($XDG_DATA_HOME) and the gateway state, including the credential
+      # encryption key ($HOME/.local/state), must land on the bind-mounted data directory.
+      XDG_DATA_HOME: /var/lib/openshell
+      HOME: /var/lib/openshell
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       # docker-compose.proxy.yml mounts gateway.proxy.toml over this path.
       - ./openshell/gateway.toml:/etc/openshell/gateway.toml:ro
-      # Same path on the host and in the container (the supervisor binary is bind-mounted into sandboxes).
-      - type: bind
-        source: /var/lib/openshell
-        target: /var/lib/openshell
-        bind:
-          create_host_path: true
+      - *openshell-data
 
   # Only builds the hermes-sandbox:local image.
   hermes-image:
