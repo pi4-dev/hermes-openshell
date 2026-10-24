@@ -43,7 +43,7 @@ The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.prox
 
 Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them otherwise.
 
-1. **Requirements.** Linux with Docker Engine **28.0 or later** and the compose plugin (check with `docker version --format '{{.Server.Version}}'`). Older engines fail sandbox creation with `getent unable to find entry "998:998" in passwd database`, because they look up the container user on the host. The kernel must support Landlock (ABI 3 or later) and seccomp.
+1. **Requirements.** Linux with Docker Engine **28.0 or later** and the compose plugin (check with `docker version --format '{{.Server.Version}}'`). Older engines fail sandbox creation with `getent unable to find entry "998:998" in passwd database`, because they look up the container user on the host. The kernel needs seccomp and Landlock ABI 3 or later (Linux 6.2+), and Landlock must be **enabled**: `cat /sys/kernel/security/lsm` has to list `landlock`. Some kernels, such as Proxmox's, build Landlock in but leave it out of the active list. Then add it to the `lsm=` boot parameter, keeping the LSMs already listed, e.g. `lsm=landlock,lockdown,yama,integrity,apparmor`, and reboot. In an LXC container this is the host's kernel. Bootstrap checks this before it creates the sandbox.
 
 2. **Configuration.** Run `cp .env.example .env` and fill in:
    - `COMPOSE_FILE`: keep it to use the upstream proxy, comment it out to run without it,
