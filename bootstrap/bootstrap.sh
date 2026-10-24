@@ -3,25 +3,6 @@
 set -eu
 GW=http://openshell-gateway:8080
 
-# The sandbox runtime requires Landlock ABI 3+ in the kernel's active LSM list (this container shares
-# the host kernel). Without it the sandbox only fails with "exited before supervisor became ready".
-python - <<'EOF'
-import ctypes, errno, sys
-libc = ctypes.CDLL(None, use_errno=True)
-abi = libc.syscall(444, None, 0, 1)  # landlock_create_ruleset(NULL, 0, LANDLOCK_CREATE_RULESET_VERSION)
-err = ctypes.get_errno()
-if abi >= 3:
-    sys.exit(0)
-if abi >= 0:
-    sys.exit(f"Landlock ABI {abi} is too old: OpenShell needs ABI 3 or later (Linux 6.2+).")
-if err == errno.EOPNOTSUPP:
-    sys.exit("Landlock is built into the kernel but not enabled: add landlock to the lsm= kernel "
-             "parameter and reboot (see README, step 1).")
-if err == errno.ENOSYS:
-    sys.exit("The kernel has no Landlock support: OpenShell needs Landlock ABI 3 or later (Linux 6.2+).")
-print(f"warning: cannot probe Landlock ({errno.errorcode.get(err, err)}), continuing", file=sys.stderr)
-EOF
-
 echo "Waiting for the gateway..."
 until python -c "import urllib.request; urllib.request.urlopen('http://openshell-gateway:8081/readyz')" 2>/dev/null; do sleep 2; done
 
