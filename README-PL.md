@@ -95,6 +95,6 @@ Następnie uruchom `docker compose up -d openshell-gateway` (compose odtworzy ga
 
 ## Do sprawdzenia względem przypiętej wersji OpenShell
 
-- Instalacja Hermesa przez pip z gita na obrazie `openshell-community/sandboxes/base`. Przypnij `HERMES_REF`.
+- Instalacja Hermesa na obrazie `openshell-community/sandboxes/base`: `uv sync --frozen` z `uv.lock` checkoutu `HERMES_REF` (zwykły pip nie rozwiązuje zależności hermes-agent). Lock obejmuje tylko Pythona 3.14, czyli wersję z obrazu bazowego. Przypnij `HERMES_REF`.
 - Błąd `CERTIFICATE_VERIFY_FAILED` przy `inference.local`: ustaw w sandboxie `SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem`.
 - **(proxy)** `proxy_connect_by_hostname = true` jest konieczne, bo inaczej CONNECT idzie na IP i `dstdomain` w squidzie nie działa.
