@@ -35,3 +35,6 @@ proxy_connect_by_hostname = true
 
 # The hermes-sandbox:local image exists only locally — pull only images that are missing.
 image_pull_policy = "if_not_present"
+# Docker's default AppArmor profile (docker-default) denies mount operations the sandbox
+# runtime needs, so the workload container exits during startup. Same as deploy/docker upstream.
+app_armor_profile = "Unconfined"
