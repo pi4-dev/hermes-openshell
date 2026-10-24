@@ -43,7 +43,7 @@ The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.prox
 
 Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them otherwise.
 
-1. **Requirements.** Linux with Docker Engine and the compose plugin. The kernel must support Landlock and seccomp.
+1. **Requirements.** Linux with Docker Engine **28.0 or later** and the compose plugin (check with `docker version --format '{{.Server.Version}}'`). Older engines fail sandbox creation with `getent unable to find entry "998:998" in passwd database`, because they look up the container user on the host. The kernel must support Landlock (ABI 3 or later) and seccomp.
 
 2. **Configuration.** Run `cp .env.example .env` and fill in:
    - `COMPOSE_FILE`: keep it to use the upstream proxy, comment it out to run without it,
