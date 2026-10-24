@@ -84,10 +84,9 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
    Potem:
    ```
    openshell gateway add http://127.0.0.1:8080 --name local
-   openshell sandbox connect hermes
-   hermes
+   openshell sandbox exec --tty hermes -- hermes
    ```
-   `sandbox connect` używa klienta `ssh` z hosta. Do ciągłej pracy (Telegram, Slack, API) ustaw `HERMES_CMD=hermes gateway run` i odtwórz sandbox (`openshell sandbox delete hermes`, potem ponownie bootstrap).
+   `sandbox exec` uruchamia w sandboxie nowy proces. Powłokę dostaniesz przez `openshell sandbox exec --tty hermes -- /bin/bash -l`. `openshell sandbox connect hermes` nie otwiera powłoki. Podłącza się do głównego procesu sandboxa (`HERMES_CMD`) i odtwarza jego ostatnie wyjście. Przy domyślnym `sleep infinity` nic nie pokazuje, więc tylko wygląda na zawieszone. `Ctrl-C` rozłącza i zostawia główny proces uruchomiony. Do ciągłej pracy (Telegram, Slack, API) ustaw `HERMES_CMD=hermes gateway run` i odtwórz sandbox (`openshell sandbox delete hermes`, potem ponownie bootstrap). Wtedy `sandbox connect` pokazuje wyjście tego gatewaya. Wymaga klienta `ssh` na hoście.
 
 ### Późniejsza zmiana trybu
 
@@ -98,7 +97,7 @@ Następnie uruchom `docker compose up -d openshell-gateway` (compose odtworzy ga
 
 ## Weryfikacja
 
-- W sandboxie: `hermes -z "ping"` powinien dostać odpowiedź z backendu modelu.
+- `openshell sandbox exec hermes -- hermes -z "ping"` powinien dostać odpowiedź z backendu modelu.
 - `openshell policy get hermes --full` pokazuje regułę providera dla hosta backendu modelu.
 - Host spoza polityki powinien zostać odrzucony już przez OpenShell.
 - **(proxy)** Log squida: `docker compose exec squid tail -f /var/log/squid/access.log`. Po zapytaniu z Hermesa powinien się w nim pojawić `CONNECT <host-modelu>:443`.
