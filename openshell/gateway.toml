@@ -5,6 +5,8 @@ version = 2
 
 [openshell.gateway]
 compute_driver = "docker"
+# /healthz and /readyz are served only on this separate listener.
+health_bind_address = "0.0.0.0:8081"
 
 # TLS is disabled and the port is published only on loopback and docker0: user calls (CLI, bootstrap)
 # are unauthenticated. Supervisors still authenticate with the JWT keys below.

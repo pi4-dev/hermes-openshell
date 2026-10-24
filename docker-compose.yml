@@ -41,6 +41,7 @@ services:
       # TLS is disabled = no auth, so it is not exposed on 0.0.0.0.
       - "127.0.0.1:8080:8080"
       - "${HOST_BRIDGE_IP}:8080:8080"
+      - "127.0.0.1:8081:8081"           # health: /healthz, /readyz
     extra_hosts:
       - "host.docker.internal:host-gateway"
       - "host.openshell.internal:host-gateway"

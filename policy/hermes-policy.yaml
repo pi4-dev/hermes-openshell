@@ -1,6 +1,8 @@
 # Start from the default policy of your version (Reference -> Default Policy) and compare the
 # filesystem/process sections; network_policies below are the Hermes-specific part.
-# inference.local does NOT need an entry — it is handled before policy evaluation.
+# The model backend does NOT need an entry — the attached provider (bootstrap) adds its rule.
+# Binaries are matched by their real path: the base image's Python is uv-managed under
+# /sandbox/.uv/python (/usr/local/bin/python3 and the venv pythons are symlinks to it).
 version: 1
 
 filesystem_policy:
@@ -25,12 +27,10 @@ network_policies:
       - { host: raw.githubusercontent.com, port: 443 }
     binaries:
       - path: /usr/bin/git
-      - path: /usr/bin/python3*        # venv python is a symlink -> the real binary is what counts
-      - path: /opt/hermes/.venv/bin/*
+      - path: /sandbox/.uv/python/**
   pypi:
     endpoints:
       - { host: pypi.org, port: 443 }
       - { host: files.pythonhosted.org, port: 443 }
     binaries:
-      - path: /usr/bin/python3*
-      - path: /opt/hermes/.venv/bin/*
+      - path: /sandbox/.uv/python/**

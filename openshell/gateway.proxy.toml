@@ -5,6 +5,8 @@ version = 2
 
 [openshell.gateway]
 compute_driver = "docker"
+# /healthz and /readyz are served only on this separate listener.
+health_bind_address = "0.0.0.0:8081"
 
 # TLS is disabled and the port is published only on loopback and docker0: user calls (CLI, bootstrap)
 # are unauthenticated. Supervisors still authenticate with the JWT keys below.
@@ -24,7 +26,7 @@ socket_path = "/var/run/docker.sock"
 # so the firewall can enforce "squid only".
 supervisor_network_mode = "bridge"
 
-# All sandbox egress (including routed inference.local) -> squid on docker0.
+# All sandbox egress (including model requests) -> squid on docker0.
 # TOML does not interpolate .env — put the same IP as HOST_BRIDGE_IP here.
 https_proxy = "http://172.17.0.1:3128"
 no_proxy = "host.openshell.internal,host.docker.internal,localhost,127.0.0.1"
