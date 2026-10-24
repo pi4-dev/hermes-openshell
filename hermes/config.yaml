@@ -1,0 +1,8 @@
+# Hermes gada wyłącznie z inference.local. OpenShell podmienia model i wstrzykuje
+# prawdziwy klucz poza sandboxem, więc oba pola poniżej są atrapami.
+model:
+  provider: custom
+  base_url: https://inference.local/v1
+  api_key: unused
+  default: routed-by-openshell
+  context_length: 131072   # ustaw na realne okno kontekstu modelu

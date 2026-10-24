@@ -1,0 +1,9 @@
+# --- backend modelu (zmień na swój) ---
+.openrouter.ai
+# --- budowanie obrazów / instalacja Hermesa i CLI ---
+pypi.org
+.pythonhosted.org
+github.com
+.githubusercontent.com
+codeload.github.com
+# --- to, do czego Hermes ma mieć dostęp w pracy (musi być TEŻ w policy OpenShell) ---

@@ -1,0 +1,103 @@
+name: hermes-openshell
+
+# Stack: squid (jedyne wyjście do internetu) + OpenShell gateway (driver docker)
+# + obraz sandboxa z Hermesem + jednorazowy bootstrap (provider, inference, sandbox).
+# Kontener sandboxa z Hermesem NIE jest usługą compose — tworzy go gateway przez docker.sock.
+
+services:
+  squid:
+    image: ubuntu/squid:latest            # przypnij konkretny tag w produkcji
+    restart: unless-stopped
+    networks:
+      osnet:
+        ipv4_address: 172.30.0.10         # stały adres -> reguła firewalla DOCKER-USER
+    ports:
+      # Wystawiony tylko na IP mostka docker0: osiągalny z kontenerów sandboxów,
+      # z kontenerów budujących obraz i z hosta, ale nie z LAN-u.
+      - "${HOST_BRIDGE_IP}:3128:3128"
+    volumes:
+      - ./squid/squid.conf:/etc/squid/squid.conf:ro
+      - ./squid/whitelist.txt:/etc/squid/whitelist.txt:ro
+      - squid-logs:/var/log/squid
+
+  openshell-gateway:
+    image: ghcr.io/nvidia/openshell/gateway:${OPENSHELL_GATEWAY_TAG}
+    restart: unless-stopped
+    depends_on: [squid]
+    networks: [osnet]
+    group_add: ["${DOCKER_GID}"]          # dostęp do /var/run/docker.sock bez roota
+    ports:
+      # Sandboxy wołają z powrotem host.openshell.internal:8080 -> port MUSI być 8080 po obu stronach.
+      # TLS jest wyłączony = brak auth, więc nie wystawiamy na 0.0.0.0.
+      - "127.0.0.1:8080:8080"
+      - "${HOST_BRIDGE_IP}:8080:8080"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+      - "host.openshell.internal:host-gateway"
+    environment:
+      OPENSHELL_COMPUTE_DRIVER: docker
+      OPENSHELL_DB_URL: sqlite:/var/lib/openshell/openshell.db
+      OPENSHELL_DISABLE_TLS: "true"
+      # Nazwa zmiennej/flagi wskazującej plik TOML -> porównaj z deploy/docker/docker-compose.yml
+      # z repo NVIDIA/OpenShell dla przypiętej wersji.
+      OPENSHELL_GATEWAY_CONFIG: /etc/openshell/gateway.toml
+      # Ruch samego gatewaya (np. sonda upstreamu przy `inference set`) idzie przez squid.
+      HTTPS_PROXY: http://squid:3128
+      HTTP_PROXY: http://squid:3128
+      NO_PROXY: localhost,127.0.0.1,host.openshell.internal,host.docker.internal
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./openshell/gateway.toml:/etc/openshell/gateway.toml:ro
+      # Ta sama ścieżka na hoście i w kontenerze (bind-mount binarki supervisora do sandboxów).
+      - type: bind
+        source: /var/lib/openshell
+        target: /var/lib/openshell
+        bind:
+          create_host_path: true
+
+  # Tylko buduje obraz hermes-sandbox:local (buduj PO uruchomieniu squida, patrz README).
+  hermes-image:
+    image: hermes-sandbox:local
+    build:
+      context: ./hermes
+      args:
+        HERMES_REF: ${HERMES_REF}
+        HTTP_PROXY: http://${HOST_BRIDGE_IP}:3128
+        HTTPS_PROXY: http://${HOST_BRIDGE_IP}:3128
+    entrypoint: ["true"]
+    restart: "no"
+
+  bootstrap:
+    build:
+      context: ./bootstrap
+      args:
+        OPENSHELL_CLI_VERSION: ${OPENSHELL_CLI_VERSION}
+        HTTP_PROXY: http://${HOST_BRIDGE_IP}:3128
+        HTTPS_PROXY: http://${HOST_BRIDGE_IP}:3128
+    depends_on:
+      openshell-gateway:
+        condition: service_started
+      hermes-image:
+        condition: service_completed_successfully
+    networks: [osnet]
+    restart: "no"
+    environment:
+      NO_PROXY: openshell-gateway
+      MODEL_BASE_URL: ${MODEL_BASE_URL}
+      MODEL_API_KEY: ${MODEL_API_KEY}
+      MODEL_NAME: ${MODEL_NAME}
+      SANDBOX_NAME: ${SANDBOX_NAME}
+      HERMES_CMD: ${HERMES_CMD}
+    volumes:
+      - ./policy:/policy:ro
+      - openshell-cli:/root/.config/openshell
+
+networks:
+  osnet:
+    ipam:
+      config:
+        - subnet: 172.30.0.0/24
+
+volumes:
+  squid-logs:
+  openshell-cli:
