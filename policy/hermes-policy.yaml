@@ -1,6 +1,6 @@
 # Start from the default policy of your version (Reference -> Default Policy) and compare the
 # filesystem/process sections; network_policies below are the Hermes-specific part.
-# The model backend does NOT need an entry — the attached provider (bootstrap) adds its rule.
+# Hermes reaches the model only through the relay (model-relay service, see hermes/config.yaml).
 # Binaries are matched by their real path: the base image's Python is uv-managed under
 # /sandbox/.uv/python (/usr/local/bin/python3 and the venv pythons are symlinks to it).
 version: 1
@@ -18,6 +18,11 @@ process:
   run_as_group: sandbox
 
 network_policies:
+  model:
+    endpoints:
+      - { host: host.docker.internal, port: 8082 }
+    binaries:
+      - path: /sandbox/.uv/python/**
   # Example: Hermes may read GitHub and install packages from PyPI.
   # In proxy mode every host here must also be in squid/whitelist.txt (two independent gates).
   github:

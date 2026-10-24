@@ -4,5 +4,5 @@ ARG OPENSHELL_CLI_VERSION=
 COPY install-openshell-cli.py /tmp/
 RUN python /tmp/install-openshell-cli.py /usr/local/bin && rm /tmp/install-openshell-cli.py
 ENV HTTP_PROXY= HTTPS_PROXY=
-COPY model-profile.py bootstrap.sh /
+COPY bootstrap.sh /
 ENTRYPOINT ["/bin/sh", "/bootstrap.sh"]

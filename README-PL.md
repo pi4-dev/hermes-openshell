@@ -8,34 +8,37 @@ Agent [Hermes](https://github.com/NousResearch/hermes-agent) (NousResearch) uruc
 ## Architektura
 
 ```
-Hermes (sandbox) ──▶ proxy supervisora OpenShell ──▶ [Squid (whitelista)] ──▶ internet / API modelu
-                     (polityka per binarka,             opcjonalnie
-                      placeholder -> prawdziwy klucz API)
+Hermes (sandbox) ──▶ proxy supervisora OpenShell ──▶ [Squid (whitelista)] ──▶ internet
+                     (polityka per binarka)   │          opcjonalnie
+                                              └──▶ model-relay ──▶ [Squid] ──▶ API modelu
+                                                   (klucz, endpoint, nazwa modelu)
 ```
 
-- Hermes woła natywne API backendu modelu zgodne z OpenAI (`MODEL_BASE_URL`, `MODEL_NAME`). Klucz API jest przechowywany w providerze OpenShell. Sandbox widzi tylko placeholder w `MODEL_API_KEY`, a OpenShell podmienia go na prawdziwy klucz w zapytaniach do hosta backendu.
-- Bootstrap generuje profil providera (`hermes-model`) z `MODEL_BASE_URL`. Profil dopuszcza ten jeden host, tylko dla Pythona w sandboxie, a provider jest podpięty do sandboxa.
+- Hermes zna tylko relay modelu (`http://host.docker.internal:8082/v1`), alias modelu `assistant` i atrapę klucza. Usługa `model-relay` trzyma `MODEL_BASE_URL`, `MODEL_API_KEY` i `MODEL_NAME`. Dodaje klucz, podmienia alias na prawdziwy model i sama odpowiada na `/v1/models`. Z odpowiedzi usuwa nazwy modeli, pola z providerem i komentarze SSE, a przekazuje dalej tylko wywołania inferencji.
+- Sandbox nie dostaje żadnych ustawień modelu ani providera OpenShell. `hermes` w obrazie to launcher, który usuwa zmienne `OPENSHELL_*` i kieruje zmienne z bundlem CA na neutralne kopie. `hermes/config.yaml` nie ma komentarzy, bo Hermes może go przeczytać.
+- Nadal widoczne w sandboxie, bo to sam runtime OpenShell: PID 1 `/.openshell/runtime/openshell-sandbox` w `/proc`, montowania pod `/.openshell` i `/run/openshell-supervisor-ca` oraz CA TLS `OpenShell Sandbox CA` na przechwytywanych połączeniach HTTPS. Dociekliwy agent nadal może ustalić, że działa w OpenShell, ale nie pozna endpointu modelu ani klucza.
 - Kontener sandboxa z Hermesem nie jest usługą compose. Tworzy go gateway przez `docker.sock`.
-- Bez upstream proxy ruch wychodzący kontroluje tylko OpenShell (`policy/hermes-policy.yaml` plus reguła providera, per binarka).
+- Bez upstream proxy ruch wychodzący kontroluje tylko polityka OpenShell (`policy/hermes-policy.yaml`, per binarka).
 
 ### Opcjonalne upstream proxy (Squid)
 
 Proxy włącza linia `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` w `.env`. W `.env.example` jest włączona. Zakomentuj ją, żeby działać bez Squida.
 
 - `HTTPS_PROXY` w sandboxie nie działa z założenia, bo supervisor przepisuje środowisko proxy agenta. Squid jest więc podpięty jako upstream supervisora przez `[openshell.drivers.docker] https_proxy` w `openshell/gateway.proxy.toml`.
-- Dostęp przechodzi przez dwie niezależne bramki. Host musi być **jednocześnie** dopuszczony przez OpenShell (`policy/hermes-policy.yaml` albo profil providera dla backendu modelu; per binarka) i w `squid/whitelist.txt` (Squid, per domena).
-- Przez Squida idzie też ruch samego gatewaya i budowa obrazów (`pip`, `git`).
+- Dostęp przechodzi przez dwie niezależne bramki. Host musi być **jednocześnie** w `policy/hermes-policy.yaml` (OpenShell, per binarka) i w `squid/whitelist.txt` (Squid, per domena).
+- Przez Squida idzie też ruch samego gatewaya, relay modelu i budowa obrazów (`pip`, `git`).
 - `firewall.sh` może dodatkowo zablokować bezpośrednie wyjście kontenerów, tak żeby Squid był jedyną drogą na zewnątrz.
 
 | Ścieżka | Rola |
 |---|---|
-| `docker-compose.yml` | bazowy stack: openshell-init (klucze JWT), openshell-gateway, budowa obrazu Hermesa, bootstrap |
+| `docker-compose.yml` | bazowy stack: openshell-init (klucze JWT), openshell-gateway, model-relay, budowa obrazu Hermesa, bootstrap |
 | `docker-compose.proxy.yml` | opcjonalne upstream proxy: squid i ustawienia proxy dla gatewaya i buildów |
 | `openshell/gateway.toml` | driver docker, tryb sieci bridge (bez proxy) |
 | `openshell/gateway.proxy.toml` | to samo plus upstream proxy supervisora (używany z proxy) |
 | `squid/` | konfiguracja i whitelista domen |
-| `hermes/` | obraz sandboxa z Hermesem i `config.yaml` (model z `MODEL_BASE_URL`/`MODEL_NAME`, klucz z `MODEL_API_KEY`) |
-| `bootstrap/` | jednorazowa konfiguracja przez CLI OpenShell: rejestracja gatewaya, profil providera modelu i provider, sandbox |
+| `model-relay/` | relay zgodny z OpenAI, który trzyma klucz, endpoint i nazwę modelu; jedyny endpoint modelu znany Hermesowi |
+| `hermes/` | obraz sandboxa z Hermesem, `config.yaml` (tylko relay i alias modelu) i launcher `hermes` |
+| `bootstrap/` | jednorazowa konfiguracja przez CLI OpenShell: rejestracja gatewaya, sandbox |
 | `policy/hermes-policy.yaml` | polityka OpenShell (filesystem, proces, sieć) |
 | `firewall.sh` | reguły DOCKER-USER: kontenery wychodzą tylko przez squida (tylko z proxy) |
 
@@ -64,13 +67,13 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
 
 7. **Start gatewaya.**
    ```
-   docker compose up -d openshell-gateway
+   docker compose up -d openshell-gateway model-relay
    curl -sf http://127.0.0.1:8081/healthz
    ```
    Port musi być 8080 po obu stronach, bo sandboxy wołają z powrotem `host.openshell.internal:8080`.
    Compose najpierw uruchamia `openshell-init`, który zapisuje klucze JWT sandboxów w `/var/lib/openshell/tls`. Driver docker ich wymaga. Gateway trzyma bazę, klucze i wypakowaną binarkę supervisora w `/var/lib/openshell` na hoście i działa jako root, tak jak setup `deploy/docker` w repo OpenShell.
 
-8. **Bootstrap:** `docker compose up bootstrap`. Skrypt rejestruje gateway, importuje profil providera modelu, tworzy providera z kluczem i tworzy sandbox z podpiętym providerem. Ponowne uruchomienie: `docker compose run --rm bootstrap`. Kolejne uruchomienie aktualizuje profil i klucz, a istniejący sandbox zostawia bez zmian. Działające już procesy (Hermes trzyma w tle `hermes gateway run`) używają starego klucza do restartu, więc po zmianie klucza wykonaj `openshell sandbox stop hermes` i `openshell sandbox start hermes`.
+8. **Bootstrap:** `docker compose up bootstrap`. Skrypt rejestruje gateway i tworzy sandbox z polityką. Ponowne uruchomienie: `docker compose run --rm bootstrap`; istniejący sandbox zostaje bez zmian. Żeby zmienić model, klucz albo endpoint, popraw `.env` i uruchom `docker compose up -d model-relay`; sandboxa nie trzeba ruszać. Jeśli okno kontekstu modelu nie wynosi 131072 tokenów, ustaw `context_length` w `hermes/config.yaml` i przebuduj obraz.
 
 9. **Praca z Hermesem.** Zainstaluj CLI OpenShell na hoście, w tej samej wersji co gateway. Paczka `openshell` na PyPI to tylko SDK Pythona, a upstreamowy `install.sh` stawia też własny lokalny gateway, więc weź statyczną binarkę z wydania:
    ```
@@ -98,13 +101,13 @@ Następnie uruchom `docker compose up -d openshell-gateway` (compose odtworzy ga
 ## Weryfikacja
 
 - `openshell sandbox exec hermes -- hermes -z "ping"` powinien dostać odpowiedź z backendu modelu.
-- `openshell policy get hermes --full` pokazuje regułę providera dla hosta backendu modelu.
+- `docker compose logs model-relay` pokazuje zapytanie (`POST /v1/chat/completions`). `openshell policy get hermes --full` pokazuje regułę `model` dla `host.docker.internal:8082`.
 - Host spoza polityki powinien zostać odrzucony już przez OpenShell.
-- **(proxy)** Log squida: `docker compose exec squid tail -f /var/log/squid/access.log`. Po zapytaniu z Hermesa powinien się w nim pojawić `CONNECT <host-modelu>:443`.
+- **(proxy)** Log squida: `docker compose exec squid tail -f /var/log/squid/access.log`. Po zapytaniu z Hermesa powinien się w nim pojawić `CONNECT <host-modelu>:443` od relaya.
 - **(proxy)** Host dozwolony w polityce, ale nieobecny w whiteliście, powinien dać `TCP_DENIED` w squidzie.
 
 ## Do sprawdzenia względem przypiętej wersji OpenShell
 
 - Instalacja Hermesa na obrazie `openshell-community/sandboxes/base`: `uv sync --frozen` z `uv.lock` checkoutu `HERMES_REF` (zwykły pip nie rozwiązuje zależności hermes-agent). Lock obejmuje tylko Pythona 3.14, czyli wersję z obrazu bazowego. Przypnij `HERMES_REF`.
-- Profil providera i polityka wskazują binarkę `/sandbox/.uv/python/**`, czyli prawdziwą ścieżkę Pythona z obrazu bazowego (`/usr/local/bin/python3` to symlink do niego). Po zmianie obrazu bazowego sprawdź w sandboxie `readlink -f "$(command -v python3)"` i popraw `bootstrap/model-profile.py` oraz politykę.
+- Polityka wskazuje binarkę `/sandbox/.uv/python/**`, czyli prawdziwą ścieżkę Pythona z obrazu bazowego (`/usr/local/bin/python3` to symlink do niego). Po zmianie obrazu bazowego sprawdź w sandboxie `readlink -f "$(command -v python3)"` i popraw politykę.
 - **(proxy)** `proxy_connect_by_hostname = true` jest konieczne, bo inaczej CONNECT idzie na IP i `dstdomain` w squidzie nie działa.
