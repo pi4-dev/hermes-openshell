@@ -6,12 +6,23 @@ version = 2
 [openshell.gateway]
 compute_driver = "docker"
 
+# TLS is disabled and the port is published only on loopback and docker0: user calls (CLI, bootstrap)
+# are unauthenticated. Supervisors still authenticate with the JWT keys below.
+[openshell.gateway.auth]
+allow_unauthenticated_users = true
+
+# Written by the openshell-init service.
+[openshell.gateway.gateway_jwt]
+signing_key_path = "/var/lib/openshell/tls/jwt/signing.pem"
+public_key_path  = "/var/lib/openshell/tls/jwt/public.pem"
+kid_path         = "/var/lib/openshell/tls/jwt/kid"
+gateway_id       = "hermes-openshell"
+
 [openshell.drivers.docker]
 socket_path = "/var/run/docker.sock"
 # bridge instead of the default host: supervisor traffic goes through FORWARD/DOCKER-USER,
 # so in proxy mode the firewall can enforce "squid only".
 supervisor_network_mode = "bridge"
 
-# The hermes-sandbox:local image exists only locally — set the pull policy so it is not pulled
-# (check the allowed values in the Gateway Config reference for your version) or push it to a local registry.
-# image_pull_policy = "..."
+# The hermes-sandbox:local image exists only locally — pull only images that are missing.
+image_pull_policy = "if_not_present"

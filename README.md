@@ -28,7 +28,7 @@ The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.prox
 
 | Path | Role |
 |---|---|
-| `docker-compose.yml` | base stack: openshell-gateway, Hermes image build, bootstrap |
+| `docker-compose.yml` | base stack: openshell-init (JWT keys), openshell-gateway, Hermes image build, bootstrap |
 | `docker-compose.proxy.yml` | optional upstream proxy: squid and proxy settings for the gateway and the builds |
 | `openshell/gateway.toml` | docker driver, bridge network mode (without the proxy) |
 | `openshell/gateway.proxy.toml` | the same plus the supervisor's upstream proxy (used with the proxy) |
@@ -47,7 +47,6 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
 2. **Configuration.** Run `cp .env.example .env` and fill in:
    - `COMPOSE_FILE`: keep it to use the upstream proxy, comment it out to run without it,
    - `HOST_BRIDGE_IP` (from `ip -4 addr show docker0`),
-   - `DOCKER_GID` (from `getent group docker | cut -d: -f3`),
    - `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME`.
 
 3. **(proxy) IP and whitelist.** Put the same bridge IP in `https_proxy` in `openshell/gateway.proxy.toml`, because TOML does not read `.env`. Add the model backend host to `squid/whitelist.txt`.
@@ -68,6 +67,7 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    curl -sf http://127.0.0.1:8080/healthz
    ```
    The port must be 8080 on both sides, because sandboxes call back to `host.openshell.internal:8080`.
+   Compose first runs `openshell-init`, which writes the sandbox JWT keys to `/var/lib/openshell/tls`. The Docker driver requires them. The gateway keeps its database, keys and the extracted supervisor binary in `/var/lib/openshell` on the host and runs as root, like the `deploy/docker` setup in the OpenShell repo.
 
 8. **Bootstrap:** `docker compose up bootstrap`. The script registers the gateway, creates the provider, sets up inference routing and creates the sandbox. To run it again: `docker compose run --rm bootstrap`.
 
@@ -95,8 +95,6 @@ Then run `docker compose up -d openshell-gateway` (compose recreates the gateway
 
 ## To check against the pinned OpenShell version
 
-- How the TOML file is passed to the gateway container. `OPENSHELL_GATEWAY_CONFIG` is an assumption; compare with `deploy/docker/docker-compose.yml` in the OpenShell repo.
-- `image_pull_policy` for the local `hermes-sandbox:local` image (in both `openshell/gateway*.toml` files). The alternative is a local registry.
 - Installing Hermes via pip from git on the `openshell-community/sandboxes/base` image. Pin `HERMES_REF`.
 - `CERTIFICATE_VERIFY_FAILED` error with `inference.local`: set `SSL_CERT_FILE=/etc/openshell-tls/ca-bundle.pem` in the sandbox.
 - **(proxy)** `proxy_connect_by_hostname = true` is required, because otherwise CONNECT goes to the IP and `dstdomain` in squid does not match.
