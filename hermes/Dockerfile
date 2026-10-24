@@ -11,7 +11,7 @@ RUN python3 -m venv /opt/hermes/.venv \
 COPY --chown=sandbox:sandbox config.yaml /sandbox/.hermes/config.yaml
 ENV HERMES_HOME=/sandbox/.hermes
 
-# Proxy z build-args nie może zostać w obrazie — w sandboxie proxy ustawia OpenShell.
+# The proxy from build args must not stay in the image — inside the sandbox OpenShell sets the proxy.
 ENV HTTP_PROXY= HTTPS_PROXY= http_proxy= https_proxy=
 
 USER sandbox
