@@ -1,0 +1,32 @@
+# Claude Code with a Claude subscription (Pro, Max, Team, Enterprise) instead of an API key.
+# Based on providers/claude-code.yaml in the OpenShell repo, which covers API keys (x-api-key).
+#
+# Credential: the long-lived OAuth token from `claude setup-token` (CLAUDE_CODE_OAUTH_TOKEN in .env).
+# The gateway keeps it; the sandbox only gets a placeholder in CLAUDE_CODE_OAUTH_TOKEN, and the
+# supervisor puts the real token in the Authorization header of requests from the claude binary
+# to api.anthropic.com, and nowhere else.
+# Endpoints: api.anthropic.com only. The sandbox sets CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC
+# (claude/settings.json), so Claude Code sends no telemetry or error reports (statsig, sentry).
+# Binaries: the real path of Claude Code in the base sandbox image.
+
+id: claude-subscription
+display_name: Claude Code (subscription)
+description: Claude Code CLI with a Claude subscription OAuth token
+category: agent
+inference_capable: true
+credentials:
+  - name: oauth_token
+    description: OAuth token from `claude setup-token`
+    env_vars: [CLAUDE_CODE_OAUTH_TOKEN]
+    required: true
+    auth_style: bearer
+    header_name: authorization
+discovery:
+  credentials: [oauth_token]
+endpoints:
+  - host: api.anthropic.com
+    port: 443
+    protocol: rest
+    access: read-write
+    enforcement: enforce
+binaries: [/usr/local/bin/claude]

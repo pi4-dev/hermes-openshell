@@ -1,0 +1,44 @@
+# OpenShell policy for the Claude Code sandbox. api.anthropic.com is not listed here: the
+# claude-subscription provider profile (providers/claude-subscription.yaml) allows it for the
+# claude binary, together with the token.
+# Binaries are matched by their real path (the base image's Python is uv-managed under
+# /sandbox/.uv/python); processes they start are covered too.
+version: 1
+
+filesystem_policy:
+  include_workdir: true
+  read_only: [/usr, /lib, /lib64, /bin, /sbin, /etc, /opt, /proc, /dev/urandom]
+  read_write: [/sandbox, /tmp, /dev/null, /dev/ptmx, /dev/pts]
+
+landlock:
+  compatibility: best_effort
+
+process:
+  run_as_user: sandbox
+  run_as_group: sandbox
+
+network_policies:
+  # Example: cloning and fetching public repositories, and installing npm and PyPI packages.
+  # Add what your projects need; `openshell policy set claude --policy policy/claude-policy.yaml`
+  # applies changes to the network part without recreating the sandbox.
+  # In proxy mode every host here must also be in squid/whitelist.txt (two independent gates).
+  github:
+    endpoints:
+      - { host: github.com, port: 443 }
+      - { host: api.github.com, port: 443 }
+      - { host: raw.githubusercontent.com, port: 443 }
+      - { host: codeload.github.com, port: 443 }
+    binaries:
+      - path: /usr/bin/git
+  npm:
+    endpoints:
+      - { host: registry.npmjs.org, port: 443 }
+    binaries:
+      - path: /usr/bin/node
+  pypi:
+    endpoints:
+      - { host: pypi.org, port: 443 }
+      - { host: files.pythonhosted.org, port: 443 }
+    binaries:
+      - path: /sandbox/.uv/python/**
+      - path: /usr/local/bin/uv
