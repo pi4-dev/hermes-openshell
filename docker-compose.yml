@@ -1,10 +1,11 @@
 name: hermes-openshell
 
-# Base stack: OpenShell gateway (docker driver) + its one-off init (JWT keys) + model relay
-# + Hermes sandbox image + one-off bootstrap (sandbox).
+# Base stack: OpenShell gateway (docker driver) + its one-off init (JWT keys) + one-off bootstrap
+# (sandboxes), plus the agents chosen with COMPOSE_PROFILES in .env:
+#   hermes — model relay + Hermes sandbox image,  claude — Claude Code sandbox image.
 # The upstream proxy (squid) is optional and lives in docker-compose.proxy.yml,
 # enabled through COMPOSE_FILE in .env (see README).
-# The Hermes sandbox container is NOT a compose service — the gateway creates it via docker.sock.
+# The sandbox containers are NOT compose services — the gateway creates them via docker.sock.
 
 services:
   # One-off: writes the sandbox JWT signing keys to /var/lib/openshell/tls (existing keys are kept).
@@ -63,6 +64,7 @@ services:
   # OpenAI-compatible relay in front of the model backend. It holds the API key, the endpoint and
   # the real model name, so Hermes only knows the relay's address and the model alias.
   model-relay:
+    profiles: [hermes]
     build: ./model-relay
     restart: unless-stopped
     networks: [osnet]
@@ -76,6 +78,7 @@ services:
 
   # Only builds the hermes-sandbox:local image.
   hermes-image:
+    profiles: [hermes]
     image: hermes-sandbox:local
     build:
       context: ./hermes
@@ -84,26 +87,45 @@ services:
     entrypoint: ["true"]
     restart: "no"
 
+  # Only builds the claude-sandbox:local image.
+  claude-image:
+    profiles: [claude]
+    image: claude-sandbox:local
+    build: ./claude
+    entrypoint: ["true"]
+    restart: "no"
+
   bootstrap:
     build:
       context: ./bootstrap
       args:
         OPENSHELL_CLI_VERSION: ${OPENSHELL_CLI_VERSION}
+    # Services of profiles that are not enabled are skipped (required: false).
     depends_on:
       openshell-gateway:
         condition: service_started
       model-relay:
         condition: service_started
+        required: false
       hermes-image:
         condition: service_completed_successfully
+        required: false
+      claude-image:
+        condition: service_completed_successfully
+        required: false
     networks: [osnet]
     restart: "no"
     environment:
       NO_PROXY: openshell-gateway
+      AGENTS: ${COMPOSE_PROFILES:-}
       SANDBOX_NAME: ${SANDBOX_NAME}
       HERMES_CMD: ${HERMES_CMD}
+      CLAUDE_SANDBOX_NAME: ${CLAUDE_SANDBOX_NAME:-claude}
+      # Goes to the gateway as the provider credential, never into the sandbox.
+      CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     volumes:
       - ./policy:/policy:ro
+      - ./providers:/providers:ro
       - openshell-cli:/root/.config/openshell
 
 networks:
