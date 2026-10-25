@@ -26,7 +26,7 @@ Proxy włącza linia `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` 
 
 - `HTTPS_PROXY` w sandboxie nie działa z założenia, bo supervisor przepisuje środowisko proxy agenta. Squid jest więc podpięty jako upstream supervisora przez `[openshell.drivers.docker] https_proxy` w `openshell/gateway.proxy.toml`.
 - Dostęp przechodzi przez dwie niezależne bramki. Host musi być **jednocześnie** w `policy/hermes-policy.yaml` (OpenShell, per binarka) i w `squid/whitelist.txt` (Squid, per domena).
-- Przez Squida idzie też ruch samego gatewaya, relay modelu i budowa obrazów (`pip`, `git`).
+- Przez Squida idzie też ruch samego gatewaya, relay modelu i budowa obrazów (`pip`, `git`, `npm`, pobranie Node).
 - `firewall.sh` może dodatkowo zablokować bezpośrednie wyjście kontenerów, tak żeby Squid był jedyną drogą na zewnątrz.
 
 | Ścieżka | Rola |
@@ -37,7 +37,7 @@ Proxy włącza linia `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` 
 | `openshell/gateway.proxy.toml` | to samo plus upstream proxy supervisora (używany z proxy) |
 | `squid/` | konfiguracja i whitelista domen |
 | `model-relay/` | relay zgodny z OpenAI, który trzyma klucz, endpoint i nazwę modelu; jedyny endpoint modelu znany Hermesowi |
-| `hermes/` | obraz sandboxa z Hermesem, `config.yaml` (tylko relay i alias modelu) i launcher `hermes` |
+| `hermes/` | obraz sandboxa z Hermesem i gotowym dashboardem WWW, `config.yaml` (tylko relay i alias modelu) i launcher `hermes` |
 | `bootstrap/` | jednorazowa konfiguracja przez CLI OpenShell: rejestracja gatewaya, sandbox |
 | `policy/hermes-policy.yaml` | polityka OpenShell (filesystem, proces, sieć) |
 | `firewall.sh` | reguły DOCKER-USER: kontenery wychodzą tylko przez squida (tylko z proxy) |
@@ -63,7 +63,7 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
    curl -x http://172.17.0.1:3128 -I https://pypi.org
    ```
 
-6. **Budowa obrazów:** `docker compose build`. Z proxy robisz to po starcie squida, bo `pip` i `git` w buildzie idą przez niego. Pobieranie obrazów bazowych robi sam dockerd, więc ewentualne proxy ustaw w daemonie.
+6. **Budowa obrazów:** `docker compose build`. Z proxy robisz to po starcie squida, bo `pip`, `git` i `npm` w buildzie idą przez niego. Pobieranie obrazów bazowych robi sam dockerd, więc ewentualne proxy ustaw w daemonie.
 
 7. **Start gatewaya.**
    ```
@@ -90,6 +90,16 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
    openshell sandbox exec --tty hermes -- hermes
    ```
    `sandbox exec` uruchamia w sandboxie nowy proces. Powłokę dostaniesz przez `openshell sandbox exec --tty hermes -- /bin/bash -l`. `openshell sandbox connect hermes` nie otwiera powłoki. Podłącza się do głównego procesu sandboxa (`HERMES_CMD`) i odtwarza jego ostatnie wyjście. Przy domyślnym `sleep infinity` nic nie pokazuje, więc tylko wygląda na zawieszone. `Ctrl-C` rozłącza i zostawia główny proces uruchomiony. Do ciągłej pracy (Telegram, Slack, API) ustaw `HERMES_CMD=hermes gateway run` i odtwórz sandbox (`openshell sandbox delete hermes`, potem ponownie bootstrap). Wtedy `sandbox connect` pokazuje wyjście tego gatewaya. Wymaga klienta `ssh` na hoście.
+
+### Interfejs WWW (dashboard)
+
+Obraz zawiera webowy dashboard Hermesa razem z czatem. Sandbox nie ma własnej sieci, więc dashboard słucha w nim na `127.0.0.1:9119`, a `openshell forward` tuneluje ten port na hosta:
+
+1. Uruchom dashboard jako główny proces sandboxa: ustaw w `.env` `HERMES_CMD=hermes dashboard --skip-build --no-open` i odtwórz sandbox (`openshell sandbox delete hermes`, potem `docker compose up bootstrap`). Bez `--skip-build` Hermes przy starcie próbuje przebudować dashboard, co w sandboxie nie może się udać.
+2. Na hoście: `openshell forward start 9119 hermes -d`, potem otwórz http://127.0.0.1:9119/. `openshell forward stop 9119 hermes` zamyka tunel.
+3. Z innej maszyny przez SSH: `ssh -L 9119:127.0.0.1:9119 user@host-dockera`, potem otwórz tam http://127.0.0.1:9119/.
+
+Przy bindzie na loopback dashboard nie ma logowania i daje pełną kontrolę nad Hermesem (konfiguracja, klucze, sesje), więc nie przekierowuj go na `0.0.0.0` ani inny interfejs.
 
 ### Późniejsza zmiana trybu
 

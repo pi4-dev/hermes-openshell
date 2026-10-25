@@ -6,4 +6,6 @@ pypi.org
 github.com
 .githubusercontent.com
 codeload.github.com
+registry.npmjs.org
+nodejs.org
 # --- what Hermes should reach while working (must ALSO be in the OpenShell policy) ---
