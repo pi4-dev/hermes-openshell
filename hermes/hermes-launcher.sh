@@ -13,4 +13,7 @@ if [ -r "${SSL_CERT_FILE:-}" ] && mkdir -p "$certs" && cp -f "$SSL_CERT_FILE" "$
     export NODE_EXTRA_CA_CERTS="$certs/ca.crt" DENO_CERT="$certs/ca.crt"
   fi
 fi
+# The prebuilt dashboard chat (Ink TUI) and the image's Node; otherwise Hermes would try to build
+# the TUI or fetch its own Node at launch.
+export HERMES_TUI_DIR="${HERMES_TUI_DIR:-/opt/hermes-tui}" HERMES_NODE="${HERMES_NODE:-/opt/node/bin/node}"
 exec /opt/hermes/.venv/bin/hermes "$@"

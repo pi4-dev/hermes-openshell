@@ -19,6 +19,21 @@ RUN python3 -m venv /tmp/uv \
     /tmp/uv/bin/uv sync --frozen --no-dev --compile-bytecode \
  && rm -rf /opt/hermes/.git /tmp/uv
 
+# Web dashboard and its embedded chat (the Ink TUI), prebuilt: /opt/hermes is read-only in the
+# sandbox, so Hermes must not try to build them at launch. They need the Node and npm versions
+# hermes-agent pins (pm/lock.json; the base image's Node is too old), installed to /opt/node, which
+# also runs the chat. Native modules compile against its headers (npm_config_nodedir), so node-gyp
+# downloads nothing.
+COPY install-node.py /tmp/
+RUN /opt/hermes/.venv/bin/python /tmp/install-node.py /opt/hermes/pm/lock.json /opt/node \
+ && cd /opt/hermes \
+ && export PATH="/opt/node/bin:$PATH" npm_config_install_links=false npm_config_nodedir=/opt/node \
+ && node scripts/build/node-deps.mjs --source /opt/hermes --workspace ui-tui --workspace web \
+ && node scripts/build/tui.mjs --source /opt/hermes --out /opt/hermes-tui \
+ && node scripts/build/web.mjs --source /opt/hermes --icons /opt/hermes --out /opt/hermes/hermes_cli/web_dist \
+ && find /opt/hermes -name node_modules -type d -prune -exec rm -rf {} + \
+ && rm -rf /tmp/install-node.py /root/.npm
+
 # `hermes` starts Hermes without the sandbox runtime's markers in its environment.
 COPY --chmod=755 hermes-launcher.sh /usr/local/bin/hermes
 # Points only at the model relay, under a model alias; no comments, Hermes can read this file.

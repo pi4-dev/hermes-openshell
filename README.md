@@ -26,7 +26,7 @@ The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.prox
 
 - `HTTPS_PROXY` inside the sandbox does not work by design, because the supervisor rewrites the agent's proxy environment. Squid is therefore wired in as the supervisor's upstream via `[openshell.drivers.docker] https_proxy` in `openshell/gateway.proxy.toml`.
 - Access goes through two independent gates. A host must be **both** in `policy/hermes-policy.yaml` (OpenShell, per binary) and in `squid/whitelist.txt` (Squid, per domain).
-- The gateway's own traffic, the model relay and the image builds (`pip`, `git`) also go through Squid.
+- The gateway's own traffic, the model relay and the image builds (`pip`, `git`, `npm`, the Node download) also go through Squid.
 - `firewall.sh` can additionally block direct container egress, so that Squid is the only way out.
 
 | Path | Role |
@@ -37,7 +37,7 @@ The proxy is enabled by the `COMPOSE_FILE=docker-compose.yml:docker-compose.prox
 | `openshell/gateway.proxy.toml` | the same plus the supervisor's upstream proxy (used with the proxy) |
 | `squid/` | config and domain whitelist |
 | `model-relay/` | OpenAI-compatible relay holding the model key, endpoint and name; the only model endpoint Hermes knows |
-| `hermes/` | Hermes sandbox image, `config.yaml` (relay and model alias only) and the `hermes` launcher |
+| `hermes/` | Hermes sandbox image with the prebuilt web dashboard, `config.yaml` (relay and model alias only) and the `hermes` launcher |
 | `bootstrap/` | one-off setup with the OpenShell CLI: gateway registration, sandbox |
 | `policy/hermes-policy.yaml` | OpenShell policy (filesystem, process, network) |
 | `firewall.sh` | DOCKER-USER rules: containers leave only through squid (proxy only) |
@@ -63,7 +63,7 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    curl -x http://172.17.0.1:3128 -I https://pypi.org
    ```
 
-6. **Build the images:** `docker compose build`. With the proxy, do this after starting squid, because `pip` and `git` in the build go through it. Base images are pulled by dockerd itself, so set any proxy in the daemon.
+6. **Build the images:** `docker compose build`. With the proxy, do this after starting squid, because `pip`, `git` and `npm` in the build go through it. Base images are pulled by dockerd itself, so set any proxy in the daemon.
 
 7. **Start the gateway.**
    ```
@@ -90,6 +90,16 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    openshell sandbox exec --tty hermes -- hermes
    ```
    `sandbox exec` starts a new process in the sandbox. For a shell, use `openshell sandbox exec --tty hermes -- /bin/bash -l`. `openshell sandbox connect hermes` does not open a shell. It attaches to the sandbox's main process (`HERMES_CMD`) and replays its recent output. With the default `sleep infinity` it shows nothing, so it only looks like it hangs. `Ctrl-C` disconnects and leaves the main process running. For continuous operation (Telegram, Slack, API), set `HERMES_CMD=hermes gateway run` and recreate the sandbox (`openshell sandbox delete hermes`, then the bootstrap again). `sandbox connect` then shows the output of that gateway. It needs the host's `ssh` client.
+
+### Web dashboard
+
+The image contains Hermes's web dashboard, including its chat. The sandbox has no network of its own, so the dashboard listens on `127.0.0.1:9119` inside it and `openshell forward` tunnels that port to the host:
+
+1. Run the dashboard as the sandbox's main process: set `HERMES_CMD=hermes dashboard --skip-build --no-open` in `.env` and recreate the sandbox (`openshell sandbox delete hermes`, then `docker compose up bootstrap`). Without `--skip-build`, Hermes tries to rebuild the dashboard at launch, which cannot work in the sandbox.
+2. On the host: `openshell forward start 9119 hermes -d`, then open http://127.0.0.1:9119/. `openshell forward stop 9119 hermes` ends the tunnel.
+3. From another machine, go through SSH: `ssh -L 9119:127.0.0.1:9119 user@docker-host`, then open http://127.0.0.1:9119/ there.
+
+On a loopback bind the dashboard has no login and gives full control over Hermes (config, keys, sessions), so do not forward it to `0.0.0.0` or another interface.
 
 ### Switching modes later
 

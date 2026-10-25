@@ -7,8 +7,9 @@ version: 1
 
 filesystem_policy:
   include_workdir: true
-  read_only: [/usr, /lib, /lib64, /bin, /sbin, /etc, /opt/hermes, /proc, /dev/urandom]
-  read_write: [/sandbox, /tmp, /dev/null]
+  read_only: [/usr, /lib, /lib64, /bin, /sbin, /etc, /opt/hermes, /opt/hermes-tui, /opt/node, /proc, /dev/urandom]
+  # /dev/ptmx and /dev/pts: the dashboard chat runs Hermes in its own pseudo-terminal.
+  read_write: [/sandbox, /tmp, /dev/null, /dev/ptmx, /dev/pts]
 
 landlock:
   compatibility: best_effort
