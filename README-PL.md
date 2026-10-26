@@ -1,5 +1,5 @@
 <!-- Polskie tłumaczenie README.md — przy zmianach aktualizuj oba pliki. -->
-# hermes-openshell
+# openshell-env
 
 [English version](README.md)
 
