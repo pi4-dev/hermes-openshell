@@ -36,7 +36,7 @@ Claude Code (sandbox) ──▶ proxy supervisora OpenShell ──▶ [Squid] �
 Agenci współdzielą tylko gateway. Każdy ma własny sandbox, politykę i dostęp do modelu, a pliki przechodzą między nimi tylko przez ciebie (zobacz przykłady w Praca z Claude Code).
 
 - Claude Code działa na subskrypcji Claude (Pro, Max, Team lub Enterprise) z tokenem z `claude setup-token`, a nie na kluczu API. Bootstrap zapisuje token w gatewayu jako providera `claude-subscription` (`providers/claude-subscription.yaml`). W sandboxie `CLAUDE_CODE_OAUTH_TOKEN` zawiera tylko placeholder. Supervisor wstawia prawdziwy token do nagłówka `Authorization` zapytań, które `/usr/local/bin/claude` wysyła do `api.anthropic.com`, i nigdzie indziej. Z tym hostem może się łączyć tylko Claude Code i procesy, które uruchomi, a prawdziwy token nigdy nie trafia do sandboxa.
-- `claude/settings.json` wyłącza automatyczne aktualizacje, telemetrię, raporty błędów i automatyczny marketplace pluginów, więc Claude Code nie potrzebuje żadnego hosta poza `api.anthropic.com`.
+- `claude/settings.json` wyłącza automatyczne aktualizacje (Claude Code aktualizuje przebudowa obrazu, zobacz Aktualizacja Claude Code), telemetrię, raporty błędów i automatyczny marketplace pluginów, więc Claude Code nie potrzebuje żadnego hosta poza `api.anthropic.com`.
 - Sandbox z Claude nie jest zanonimizowany jak ten z Hermesem: placeholder i `OPENSHELL_SANDBOX` pokazują, że działa w OpenShell, a jego endpoint modelu to i tak api.anthropic.com.
 
 ### Opcjonalne upstream proxy (Squid)
@@ -45,7 +45,7 @@ Proxy włącza linia `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` 
 
 - `HTTPS_PROXY` w sandboxie nie działa z założenia, bo supervisor przepisuje środowisko proxy agenta. Squid jest więc podpięty jako upstream supervisora przez `[openshell.drivers.docker] https_proxy` w `openshell/gateway.proxy.toml`.
 - Dostęp przechodzi przez dwie niezależne bramki. Host musi być **jednocześnie** w polityce agenta, `policy/hermes-policy.yaml` albo `policy/claude-policy.yaml` (OpenShell, per binarka), i w `squid/whitelist.txt` (Squid, per domena).
-- Przez Squida idzie też ruch samego gatewaya, relay modelu i budowa obrazów (`pip`, `git`, `npm`, pobranie Node).
+- Przez Squida idzie też ruch samego gatewaya, relay modelu i budowa obrazów (`pip`, `git`, `npm`, pobranie Node i Claude Code).
 - `firewall.sh` może dodatkowo zablokować bezpośrednie wyjście kontenerów, tak żeby Squid był jedyną drogą na zewnątrz.
 
 | Ścieżka | Rola |
@@ -57,7 +57,7 @@ Proxy włącza linia `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` 
 | `squid/` | konfiguracja i whitelista domen |
 | `model-relay/` | relay zgodny z OpenAI, który trzyma klucz, endpoint i nazwę modelu; jedyny endpoint modelu znany Hermesowi; `/health` i `/metrics` na osobnym porcie |
 | `hermes/` | obraz sandboxa z Hermesem i gotowym dashboardem WWW, `config.yaml` (tylko relay i alias modelu) i launcher `hermes` |
-| `claude/` | obraz sandboxa z Claude Code: bazowy obraz sandboxa (Claude Code, git, Node, Python, uv, narzędzia do budowania) i ustawienia Claude |
+| `claude/` | obraz sandboxa z Claude Code: bazowy obraz sandboxa (git, Node, Python, uv, narzędzia do budowania), wydanie Claude Code z `CLAUDE_RELEASE` i ustawienia Claude |
 | `providers/claude-subscription.yaml` | profil providera OpenShell: token subskrypcji, tylko dla `claude` → `api.anthropic.com` |
 | `bootstrap/` | jednorazowa konfiguracja przez CLI OpenShell: rejestracja gatewaya, provider, sandboxy |
 | `policy/hermes-policy.yaml` | polityka OpenShell sandboxa z Hermesem (filesystem, proces, sieć) |
@@ -87,7 +87,7 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
    curl -x http://172.17.0.1:3128 -I https://pypi.org
    ```
 
-6. **Budowa obrazów:** `docker compose build` buduje obrazy wybranych agentów. Z proxy robisz to po starcie squida, bo `pip`, `git` i `npm` w buildzie idą przez niego. Pobieranie obrazów bazowych robi sam dockerd, więc ewentualne proxy ustaw w daemonie.
+6. **Budowa obrazów:** `docker compose build` buduje obrazy wybranych agentów. Z proxy robisz to po starcie squida, bo `pip`, `git`, `npm` i pobranie Claude Code w buildzie idą przez niego. Obrazy bazowe i sprawdzenie wydania Claude Code (`ADD` w `claude/Dockerfile`) pobiera sam dockerd, więc ewentualne proxy ustaw w daemonie.
 
 7. **Start gatewaya.**
    ```
@@ -128,7 +128,7 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
   ```
   Z działającym `firewall.sh` (tryb z proxy) kontenery nie mają bezpośredniego dostępu do internetu, więc użyj jednej z dwóch pierwszych opcji.
 
-Potem wpisz token do `.env` jako `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…` i uruchom bootstrap (`docker compose run --rm bootstrap`, jeśli był już uruchamiany). Traktuj token jak hasło; `.env` jest w `.gitignore`. Gdy token wygaśnie, Claude zgłosi `401 OAuth access token is invalid`: utwórz nowy tak samo, podmień go w `.env` i ponownie uruchom bootstrap. Działający sandbox przejmie go bez odtwarzania.
+Potem wpisz token do `.env` jako `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…` i uruchom bootstrap (`docker compose run --rm bootstrap`, jeśli był już uruchamiany). Traktuj token jak hasło; `.env` jest w `.gitignore`. `CLAUDE_CODE_OAUTH_TOKEN` wyeksportowany w powłoce ma dla `docker compose` pierwszeństwo przed `.env`, więc usuń go tam (`unset`). Gdy token wygaśnie, Claude zgłosi `401 OAuth access token is invalid`: utwórz nowy tak samo, podmień go w `.env` i ponownie uruchom bootstrap. Działający sandbox przejmie go bez odtwarzania.
 
 ### Interfejs WWW (dashboard)
 
@@ -222,6 +222,16 @@ openshell sandbox upload hermes change.patch /tmp
 openshell sandbox exec hermes -- hermes -z "Zrecenzuj /tmp/change.patch: błędy, brakujące testy, ryzykowne zmiany"
 ```
 
+**Aktualizacja Claude Code.** Obraz instaluje wydanie wskazane przez `CLAUDE_RELEASE` w `.env`: `latest` (domyślnie), `stable` (mniej więcej tydzień w tyle, z mniejszą liczbą regresji) albo konkretną wersję, np. `2.1.310`. `docker compose build claude-image` instaluje nowe wydanie, jeśli jest; w przeciwnym razie build pochodzi z cache. Sandbox zostaje przy obrazie, z którego go utworzono, więc odtwórz go, po pobraniu z niego tego, czego potrzebujesz:
+```
+docker compose build claude-image
+openshell sandbox download claude /sandbox/myapp ./myapp-backup
+openshell sandbox delete claude
+docker compose run --rm bootstrap
+openshell sandbox exec claude -- claude --version
+```
+Nowsze modele przychodzą z nowszymi wydaniami Claude Code (`/model`). Autoupdater jest wyłączony celowo. Tylko `/usr/local/bin/claude` może wysyłać token do api.anthropic.com, a ten plik należy do roota, więc agent nie może go podmienić. Automatyczna aktualizacja zainstalowałaby Claude Code w katalogu domowym sandboxa, do którego agent może pisać.
+
 **Więcej sandboxów z Claude**, na przykład jeden na projekt, wszystkie na tej samej subskrypcji. Uruchom to w katalogu repozytorium, bo `--policy` to lokalny plik:
 ```
 openshell sandbox create --name claude-api --from claude-sandbox:local \
@@ -254,5 +264,5 @@ Następnie uruchom `docker compose up -d openshell-gateway` (compose odtworzy ga
 
 - Instalacja Hermesa na obrazie `openshell-community/sandboxes/base`: `uv sync --frozen` z `uv.lock` checkoutu `HERMES_REF` (zwykły pip nie rozwiązuje zależności hermes-agent). Lock obejmuje tylko Pythona 3.14, czyli wersję z obrazu bazowego. Przypnij `HERMES_REF`.
 - Polityka wskazuje binarkę `/sandbox/.uv/python/**`, czyli prawdziwą ścieżkę Pythona z obrazu bazowego (`/usr/local/bin/python3` to symlink do niego). Po zmianie obrazu bazowego sprawdź w sandboxie `readlink -f "$(command -v python3)"` i popraw politykę.
-- Claude Code pochodzi z bazowego obrazu sandboxa (`openshell sandbox exec claude -- claude --version`); `docker compose build --pull claude-image` bierze nowszy, jeśli jest. `providers/claude-subscription.yaml` wskazuje jego prawdziwą ścieżkę, `/usr/local/bin/claude`. Po zmianie obrazu bazowego sprawdź w sandboxie `readlink -f "$(command -v claude)"`. Jeśli nowa wersja Claude Code potrzebuje innego hosta, `openshell logs claude` pokaże go jako `DENIED`.
+- `claude/install-claude.py` instaluje natywny build Claude Code z downloads.claude.ai do `/usr/local/bin/claude`, ścieżki wskazanej w `providers/claude-subscription.yaml`, i sprawdza jego sha256 względem manifestu wydania, tak jak oficjalny `install.sh`. Jeśli nowa wersja Claude Code potrzebuje innego hosta, `openshell logs claude` pokaże go jako `DENIED`.
 - **(proxy)** `proxy_connect_by_hostname = true` jest konieczne, bo inaczej CONNECT idzie na IP i `dstdomain` w squidzie nie działa.

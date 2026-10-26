@@ -101,7 +101,11 @@ services:
   claude-image:
     profiles: [claude]
     image: claude-sandbox:local
-    build: ./claude
+    build:
+      context: ./claude
+      args:
+        # Not CLAUDE_CODE_VERSION: Claude Code sets that in the environment of the commands it runs.
+        CLAUDE_RELEASE: ${CLAUDE_RELEASE:-latest}
     entrypoint: ["true"]
     restart: "no"
 
