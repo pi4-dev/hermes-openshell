@@ -2,7 +2,7 @@
 .openrouter.ai
 # --- Claude Code (subscription) ---
 api.anthropic.com
-# --- image builds / installing Hermes and the CLI ---
+# --- image builds / installing Hermes, Claude Code and the CLI ---
 pypi.org
 .pythonhosted.org
 github.com
@@ -10,4 +10,5 @@ github.com
 codeload.github.com
 registry.npmjs.org
 nodejs.org
+downloads.claude.ai
 # --- what Hermes should reach while working (must ALSO be in the OpenShell policy) ---
