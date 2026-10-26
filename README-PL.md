@@ -17,7 +17,7 @@ Claude Code (sandbox) ──▶ proxy supervisora OpenShell ──▶ [Squid] �
                           (dokłada token subskrypcji)
 ```
 
-- Hermes zna tylko relay modelu (`http://host.docker.internal:8082/v1`), alias modelu `assistant` i atrapę klucza. Usługa `model-relay` trzyma `MODEL_BASE_URL`, `MODEL_API_KEY` i `MODEL_NAME`. Dodaje klucz, podmienia alias na prawdziwy model i sama odpowiada na `/v1/models`. Z odpowiedzi usuwa nazwy modeli, pola z providerem i komentarze SSE, a przekazuje dalej tylko wywołania inferencji.
+- Hermes zna tylko relay modelu (`http://host.docker.internal:8082/v1`), alias modelu `assistant` i atrapę klucza. Usługa `model-relay` trzyma `MODEL_BASE_URL`, `MODEL_API_KEY` i `MODEL_NAME`. Dodaje klucz, podmienia alias na prawdziwy model i sama odpowiada na `/v1/models`. Z odpowiedzi usuwa nazwy modeli, pola z providerem, komentarze SSE i strony błędów inne niż JSON, a przekazuje dalej tylko wywołania inferencji. Nie zdradza oprogramowania serwera, a na wszystko inne odpowiada tym samym pustym 404; health i metryki są na osobnym porcie (zobacz Relay modelu: health i metryki).
 - Sandbox nie dostaje żadnych ustawień modelu ani providera OpenShell. `hermes` w obrazie to launcher, który usuwa zmienne `OPENSHELL_*` i kieruje zmienne z bundlem CA na neutralne kopie. `hermes/config.yaml` nie ma komentarzy, bo Hermes może go przeczytać.
 - Nadal widoczne w sandboxie, bo to sam runtime OpenShell: PID 1 `/.openshell/runtime/openshell-sandbox` w `/proc`, montowania pod `/.openshell` i `/run/openshell-supervisor-ca` oraz CA TLS `OpenShell Sandbox CA` na przechwytywanych połączeniach HTTPS. Dociekliwy agent nadal może ustalić, że działa w OpenShell, ale nie pozna endpointu modelu ani klucza.
 - Kontenery sandboxów nie są usługami compose. Tworzy je gateway przez `docker.sock`.
@@ -55,7 +55,7 @@ Proxy włącza linia `COMPOSE_FILE=docker-compose.yml:docker-compose.proxy.yml` 
 | `openshell/gateway.toml` | driver docker, tryb sieci bridge (bez proxy) |
 | `openshell/gateway.proxy.toml` | to samo plus upstream proxy supervisora (używany z proxy) |
 | `squid/` | konfiguracja i whitelista domen |
-| `model-relay/` | relay zgodny z OpenAI, który trzyma klucz, endpoint i nazwę modelu; jedyny endpoint modelu znany Hermesowi |
+| `model-relay/` | relay zgodny z OpenAI, który trzyma klucz, endpoint i nazwę modelu; jedyny endpoint modelu znany Hermesowi; `/health` i `/metrics` na osobnym porcie |
 | `hermes/` | obraz sandboxa z Hermesem i gotowym dashboardem WWW, `config.yaml` (tylko relay i alias modelu) i launcher `hermes` |
 | `claude/` | obraz sandboxa z Claude Code: bazowy obraz sandboxa (Claude Code, git, Node, Python, uv, narzędzia do budowania) i ustawienia Claude |
 | `providers/claude-subscription.yaml` | profil providera OpenShell: token subskrypcji, tylko dla `claude` → `api.anthropic.com` |
@@ -97,7 +97,7 @@ Kroki oznaczone **(proxy)** dotyczą tylko trybu z włączonym upstream proxy. W
    Port musi być 8080 po obu stronach, bo sandboxy wołają z powrotem `host.openshell.internal:8080`.
    Compose najpierw uruchamia `openshell-init`, który zapisuje klucze JWT sandboxów w `/var/lib/openshell/tls`. Driver docker ich wymaga. Gateway trzyma bazę, klucze i wypakowaną binarkę supervisora w `/var/lib/openshell` na hoście i działa jako root, tak jak setup `deploy/docker` w repo OpenShell.
 
-8. **Bootstrap:** `docker compose up bootstrap`. Uruchamia też relay modelu dla Hermesa. Skrypt rejestruje gateway i tworzy sandboxy wybranych agentów z ich politykami; dla Claude Code najpierw zapisuje token w gatewayu. Ponowne uruchomienie: `docker compose run --rm bootstrap`; istniejące sandboxy zostają bez zmian, ale token Claude jest aktualizowany, więc po nowym `claude setup-token` popraw `.env` i uruchom go ponownie. Działający sandbox używa nowego tokenu w nowych procesach po kilku sekundach. Żeby zmienić model, klucz albo endpoint, popraw `.env` i uruchom `docker compose up -d model-relay`; sandboxa nie trzeba ruszać. Jeśli okno kontekstu modelu nie wynosi 131072 tokenów, ustaw `context_length` w `hermes/config.yaml` i przebuduj obraz.
+8. **Bootstrap:** `docker compose up bootstrap`. Uruchamia też relay modelu dla Hermesa i czeka, aż będzie zdrowy (healthy). Skrypt rejestruje gateway i tworzy sandboxy wybranych agentów z ich politykami; dla Claude Code najpierw zapisuje token w gatewayu. Ponowne uruchomienie: `docker compose run --rm bootstrap`; istniejące sandboxy zostają bez zmian, ale token Claude jest aktualizowany, więc po nowym `claude setup-token` popraw `.env` i uruchom go ponownie. Działający sandbox używa nowego tokenu w nowych procesach po kilku sekundach. Żeby zmienić model, klucz albo endpoint, popraw `.env` i uruchom `docker compose up -d model-relay`; sandboxa nie trzeba ruszać. Jeśli okno kontekstu modelu nie wynosi 131072 tokenów, ustaw `context_length` w `hermes/config.yaml` i przebuduj obraz.
 
 9. **Praca z agentami.** Zainstaluj CLI OpenShell na hoście, w tej samej wersji co gateway. Paczka `openshell` na PyPI to tylko SDK Pythona, a upstreamowy `install.sh` stawia też własny lokalny gateway, więc weź statyczną binarkę z wydania:
    ```
@@ -125,6 +125,39 @@ Obraz zawiera webowy dashboard Hermesa razem z czatem. Sandbox nie ma własnej s
 3. Z innej maszyny przez SSH: `ssh -L 9119:127.0.0.1:9119 user@host-dockera`, potem otwórz tam http://127.0.0.1:9119/.
 
 Przy bindzie na loopback dashboard nie ma logowania i daje pełną kontrolę nad Hermesem (konfiguracja, klucze, sesje), więc nie przekierowuj go na `0.0.0.0` ani inny interfejs.
+
+### Relay modelu: health i metryki
+
+Na porcie API (8082) relay odpowiada sandboxom tylko na `/v1/models` i wywołania inferencji. Wszystko inne, także `/health` i `/metrics`, dostaje ten sam pusty 404, a żadna odpowiedź nie zdradza oprogramowania serwera. Health i metryki są na osobnym porcie, `MODEL_RELAY_OPS_ADDR` w `.env` (domyślnie `127.0.0.1:9082`), na który polityki sandboxów nie pozwalają:
+
+- `GET /health` zwraca `{"status": "ok"}`. Compose używa go jako healthchecku kontenera (`docker compose ps model-relay` pokazuje `healthy`), a bootstrap na niego czeka.
+- `GET /metrics` zwraca metryki Prometheusa. Ich etykiety nie zawierają nazw modelu ani backendu:
+
+| Metryka | Typ | Etykiety, znaczenie |
+|---|---|---|
+| `model_relay_requests_total` | counter | `path` (ścieżka API albo `other` dla wszystkiego innego), `code` |
+| `model_relay_request_duration_seconds` | histogram | `path`; całe zapytanie, razem ze streamingiem |
+| `model_relay_time_to_first_byte_seconds` | histogram | `path`; do nagłówków odpowiedzi backendu |
+| `model_relay_tokens_total` | counter | `type` (`input`, `output`), według backendu |
+| `model_relay_in_flight_requests` | gauge | zapytania w trakcie przekazywania |
+| `process_start_time_seconds` | gauge | czas startu relaya |
+
+Prometheus na tym samym hoście zbiera je tak:
+```yaml
+scrape_configs:
+  - job_name: model-relay
+    static_configs:
+      - targets: ["127.0.0.1:9082"]
+```
+Z kontenera Prometheusa w sieci compose `osnet` celem jest `model-relay:9000`. Dla Prometheusa na innej maszynie ustaw `MODEL_RELAY_OPS_ADDR` na adres hosta w LAN i uruchom `docker compose up -d model-relay`.
+
+Przykładowe zapytania do Grafany:
+- tokeny na minutę: `sum by (type) (rate(model_relay_tokens_total[5m])) * 60`
+- p95 czasu do pierwszego bajtu: `histogram_quantile(0.95, sum by (le) (rate(model_relay_time_to_first_byte_seconds_bucket[5m])))`
+- nieudane wywołania inferencji: `sum by (code) (rate(model_relay_requests_total{path!="other",code!~"2.."}[5m]))`
+- zapytania spoza API, na przykład agent skanujący relay: `increase(model_relay_requests_total{path="other"}[1h])`
+
+Tokeny są liczone, gdy backend podaje zużycie: w każdej odpowiedzi bez streamingu, a w streamach tylko wtedy, gdy backend je dołącza.
 
 ### Praca z Claude Code
 
@@ -197,7 +230,7 @@ Następnie uruchom `docker compose up -d openshell-gateway` (compose odtworzy ga
 ## Weryfikacja
 
 - `openshell sandbox exec hermes -- hermes -z "ping"` powinien dostać odpowiedź z backendu modelu.
-- `docker compose logs model-relay` pokazuje zapytanie (`POST /v1/chat/completions`). `openshell policy get hermes --full` pokazuje regułę `model` dla `host.docker.internal:8082`.
+- `docker compose logs model-relay` pokazuje zapytanie (`POST /v1/chat/completions`). `openshell policy get hermes --full` pokazuje regułę `model` dla `host.docker.internal:8082`. `curl -s http://127.0.0.1:9082/health` zwraca `{"status": "ok"}`, a `curl -s http://127.0.0.1:9082/metrics | grep model_relay_requests_total` liczy to zapytanie.
 - `openshell sandbox exec claude -- claude -p "reply with OK"` powinien dostać odpowiedź od Claude. `openshell sandbox exec claude -- printenv CLAUDE_CODE_OAUTH_TOKEN` wypisuje tylko placeholder (`openshell:resolve:env:…`), a `openshell logs claude | grep anthropic` pokazuje `ALLOWED /usr/local/bin/claude(0) -> api.anthropic.com:443 [policy:_provider_claude_subscription …]`. `401 OAuth access token is invalid` oznacza zły albo wygasły token: wygeneruj nowy przez `claude setup-token`, wpisz go do `.env` i uruchom ponownie bootstrap.
 - Host spoza polityki powinien zostać odrzucony już przez OpenShell.
 - **(proxy)** Log squida: `docker compose exec squid tail -f /var/log/squid/access.log`. Po zapytaniu z Hermesa powinien się w nim pojawić `CONNECT <host-modelu>:443` od relaya, a po zapytaniu z Claude Code `CONNECT api.anthropic.com:443`.

@@ -71,10 +71,20 @@ services:
     ports:
       # Sandboxes reach it as host.docker.internal:8082 (docker0); not exposed on 0.0.0.0.
       - "${HOST_BRIDGE_IP}:8082:8000"
+      # /health and /metrics (Prometheus) on a separate port, for the host only by default.
+      - "${MODEL_RELAY_OPS_ADDR:-127.0.0.1:9082}:9000"
     environment:
       MODEL_BASE_URL: ${MODEL_BASE_URL}
       MODEL_API_KEY: ${MODEL_API_KEY}
       MODEL_NAME: ${MODEL_NAME}
+    healthcheck:
+      # No proxy: with the upstream proxy, HTTP_PROXY points at squid.
+      test: ["CMD", "python", "-c", "import urllib.request as u; u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:9000/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+      start_interval: 1s
 
   # Only builds the hermes-sandbox:local image.
   hermes-image:
@@ -105,7 +115,7 @@ services:
       openshell-gateway:
         condition: service_started
       model-relay:
-        condition: service_started
+        condition: service_healthy
         required: false
       hermes-image:
         condition: service_completed_successfully
