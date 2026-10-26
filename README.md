@@ -75,7 +75,7 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    - `COMPOSE_PROFILES`: `hermes`, `claude` or `hermes,claude` (see Agents above),
    - `HOST_BRIDGE_IP` (from `ip -4 addr show docker0`),
    - for Hermes: `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME`,
-   - for Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`. On any computer with a browser and Claude Code, run `claude setup-token`, log in with the subscription account and copy the token (`sk-ant-oat01-…`, valid for a year).
+   - for Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`, the token from `claude setup-token` (see Claude token below).
 
 3. **(proxy) IP and whitelist.** Put the same bridge IP in `https_proxy` in `openshell/gateway.proxy.toml`, because TOML does not read `.env`. Add the model backend host to `squid/whitelist.txt` (Hermes). `api.anthropic.com` (Claude Code) is already there.
 
@@ -115,6 +115,20 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    openshell sandbox exec --tty claude -- claude
    ```
    `sandbox exec` starts a new process in the sandbox. For a shell, use `openshell sandbox exec --tty hermes -- /bin/bash -l`. `openshell sandbox connect hermes` does not open a shell. It attaches to the sandbox's main process (`HERMES_CMD`) and replays its recent output. With the default `sleep infinity` it shows nothing, so it only looks like it hangs. `Ctrl-C` disconnects and leaves the main process running. For continuous operation (Telegram, Slack, API), set `HERMES_CMD=hermes gateway run` and recreate the sandbox (`openshell sandbox delete hermes`, then the bootstrap again). `sandbox connect` then shows the output of that gateway. It needs the host's `ssh` client. For Claude Code, see the examples under Working with Claude Code.
+
+### Claude token
+
+`CLAUDE_CODE_OAUTH_TOKEN` is a long-lived token from `claude setup-token`, valid for a year. It needs a Claude subscription (Pro, Max, Team or Enterprise). Create it on any machine where you can log in with that account, but not in the OpenShell sandbox: its policy does not let the login through, and the real token is meant never to be there.
+
+- **Your computer, with a browser and Claude Code:** run `claude setup-token`. The browser opens, and after you log in the terminal prints the token (`sk-ant-oat01-…`).
+- **The Docker host over SSH, without a browser:** install Claude Code (`curl -fsSL https://claude.ai/install.sh | bash`) and run `claude setup-token`. It prints a link: open it on any device, log in and paste the code you get back into the terminal.
+- **Without installing anything on the host:** use a throwaway container from the base sandbox image, which already contains Claude Code. It is an ordinary container with normal network access, not a sandbox, and the login works as over SSH:
+  ```
+  docker run --rm -it --entrypoint claude ghcr.io/nvidia/openshell-community/sandboxes/base:latest setup-token
+  ```
+  With `firewall.sh` in place (proxy mode), containers cannot reach the internet directly, so use one of the first two options.
+
+Then put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…` and run the bootstrap (`docker compose run --rm bootstrap` if it has run before). Treat the token like a password; `.env` is in `.gitignore`. When the token expires, Claude reports `401 OAuth access token is invalid`: create a new one the same way, replace it in `.env` and run the bootstrap again. The running sandbox picks it up without being recreated.
 
 ### Web dashboard
 
