@@ -36,6 +36,8 @@ Claude Code (sandbox) ──▶ OpenShell supervisor proxy ──▶ [Squid] ─
 The agents share only the gateway. Each has its own sandbox, policy and model access, and files pass between them only through you (see the examples under Working with Claude Code).
 
 - Claude Code runs on a Claude subscription (Pro, Max, Team or Enterprise) with a token from `claude setup-token`, not on an API key. The bootstrap stores the token in the gateway as the `claude-subscription` provider (`providers/claude-subscription.yaml`). In the sandbox, `CLAUDE_CODE_OAUTH_TOKEN` holds only a placeholder. The supervisor puts the real token into the `Authorization` header of requests that `/usr/local/bin/claude` sends to `api.anthropic.com`, and nowhere else. Only Claude Code and the processes it starts may connect to that host, and the real token never enters the sandbox.
+- Such a token is for inference only (scope `user:inference`) and does not tell Claude Code the plan. Set `CLAUDE_PLAN` in `.env` (`pro`, `max`, `team` or `enterprise`), and the bootstrap writes it into Claude's settings in the sandbox. Claude Code then shows your plan and uses its default model (for example Opus on Max) instead of showing "Claude API". The requests use the subscription either way.
+- claude.ai connectors need a full login (scope `user:mcp_servers`) and are not available with this token. Claude Code logs `Missing user:mcp_servers scope (scopes=user:inference)`. MCP servers you add in the sandbox itself (`claude mcp add`) still work, with their hosts in the policy.
 - `claude/settings.json` turns off auto-updates (a rebuild updates Claude Code, see Updating Claude Code), telemetry, error reports and the automatic plugin marketplace, so Claude Code needs no host besides `api.anthropic.com`.
 - The Claude sandbox is not anonymized like the Hermes one: the placeholder and `OPENSHELL_SANDBOX` show that it runs in OpenShell, and its model endpoint is api.anthropic.com anyway.
 
@@ -75,7 +77,7 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    - `COMPOSE_PROFILES`: `hermes`, `claude` or `hermes,claude` (see Agents above),
    - `HOST_BRIDGE_IP` (from `ip -4 addr show docker0`),
    - for Hermes: `MODEL_BASE_URL`, `MODEL_API_KEY`, `MODEL_NAME`,
-   - for Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`, the token from `claude setup-token` (see Claude token below).
+   - for Claude Code: `CLAUDE_CODE_OAUTH_TOKEN`, the token from `claude setup-token` (see Claude token below), and `CLAUDE_PLAN`, your plan.
 
 3. **(proxy) IP and whitelist.** Put the same bridge IP in `https_proxy` in `openshell/gateway.proxy.toml`, because TOML does not read `.env`. Add the model backend host to `squid/whitelist.txt` (Hermes). `api.anthropic.com` (Claude Code) is already there.
 
@@ -97,7 +99,7 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
    The port must be 8080 on both sides, because sandboxes call back to `host.openshell.internal:8080`.
    Compose first runs `openshell-init`, which writes the sandbox JWT keys to `/var/lib/openshell/tls`. The Docker driver requires them. The gateway keeps its database, keys and the extracted supervisor binary in `/var/lib/openshell` on the host and runs as root, like the `deploy/docker` setup in the OpenShell repo.
 
-8. **Bootstrap:** `docker compose up bootstrap`. It also starts the model relay for Hermes and waits until it is healthy. The script registers the gateway and creates the sandboxes of the chosen agents with their policies; for Claude Code it first stores the token in the gateway. To run it again: `docker compose run --rm bootstrap`; a rerun leaves existing sandboxes alone but updates the Claude token, so after a new `claude setup-token` change `.env` and rerun it. The running sandbox uses the new token for new processes within seconds. To change the model, the key or the endpoint, edit `.env` and run `docker compose up -d model-relay`; the sandbox needs no change. If the model's context window is not 131072 tokens, set `context_length` in `hermes/config.yaml` and rebuild the image.
+8. **Bootstrap:** `docker compose up bootstrap`. It also starts the model relay for Hermes and waits until it is healthy. The script registers the gateway and creates the sandboxes of the chosen agents with their policies; for Claude Code it first stores the token in the gateway. To run it again: `docker compose run --rm bootstrap`; a rerun leaves existing sandboxes alone but updates the Claude token and plan, so after a new `claude setup-token` change `.env` and rerun it. The running sandbox uses the new token for new processes within seconds. To change the model, the key or the endpoint, edit `.env` and run `docker compose up -d model-relay`; the sandbox needs no change. If the model's context window is not 131072 tokens, set `context_length` in `hermes/config.yaml` and rebuild the image.
 
 9. **Working with the agents.** Install the OpenShell CLI on the host, in the same version as the gateway. The `openshell` package on PyPI is only the Python SDK, and the upstream `install.sh` also sets up its own local gateway, so take the static binary from the release:
    ```
@@ -128,7 +130,7 @@ Steps marked **(proxy)** apply only with the upstream proxy enabled. Skip them o
   ```
   With `firewall.sh` in place (proxy mode), containers cannot reach the internet directly, so use one of the first two options.
 
-Then put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…` and run the bootstrap (`docker compose run --rm bootstrap` if it has run before). Treat the token like a password; `.env` is in `.gitignore`. A `CLAUDE_CODE_OAUTH_TOKEN` exported in your shell takes precedence over `.env` for `docker compose`, so unset it there. When the token expires, Claude reports `401 OAuth access token is invalid`: create a new one the same way, replace it in `.env` and run the bootstrap again. The running sandbox picks it up without being recreated.
+Then put the token in `.env` as `CLAUDE_CODE_OAUTH_TOKEN=sk-ant-oat01-…`, your plan as `CLAUDE_PLAN` (for example `max`), and run the bootstrap (`docker compose run --rm bootstrap` if it has run before). Treat the token like a password; `.env` is in `.gitignore`. A `CLAUDE_CODE_OAUTH_TOKEN` exported in your shell takes precedence over `.env` for `docker compose`, so unset it there. When the token expires, Claude reports `401 OAuth access token is invalid`: create a new one the same way, replace it in `.env` and run the bootstrap again. The running sandbox picks it up without being recreated.
 
 ### Web dashboard
 

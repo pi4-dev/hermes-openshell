@@ -135,6 +135,7 @@ services:
       SANDBOX_NAME: ${SANDBOX_NAME}
       HERMES_CMD: ${HERMES_CMD}
       CLAUDE_SANDBOX_NAME: ${CLAUDE_SANDBOX_NAME:-claude}
+      CLAUDE_PLAN: ${CLAUDE_PLAN:-}
       # Goes to the gateway as the provider credential, never into the sandbox.
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
     volumes:

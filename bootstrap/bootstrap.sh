@@ -39,6 +39,11 @@ setup_claude() {
     echo "CLAUDE_CODE_OAUTH_TOKEN is empty: put the token from \`claude setup-token\` in .env." >&2
     exit 1
   fi
+  case "${CLAUDE_PLAN:-}" in
+    pro|max|team|enterprise) ;;
+    "") echo "CLAUDE_PLAN is empty: Claude Code will show \"Claude API\" and use the API default model." ;;
+    *) echo "CLAUDE_PLAN must be pro, max, team or enterprise, got: $CLAUDE_PLAN" >&2; exit 1 ;;
+  esac
   # `openshell profile update` requires the current resource_version.
   profile=/providers/claude-subscription.yaml
   if openshell profile export claude-subscription -o json > /tmp/current-profile.json 2>/dev/null; then
@@ -56,13 +61,26 @@ setup_claude() {
   else
     openshell provider create --name claude-subscription --type claude-subscription --credential CLAUDE_CODE_OAUTH_TOKEN
   fi
-  sandbox_exists "$CLAUDE_SANDBOX_NAME" && return
-  openshell sandbox create --name "$CLAUDE_SANDBOX_NAME" \
-    --from claude-sandbox:local \
-    --policy /policy/claude-policy.yaml \
-    --provider claude-subscription \
-    --detach \
-    -- sleep infinity </dev/null
+  if ! sandbox_exists "$CLAUDE_SANDBOX_NAME"; then
+    openshell sandbox create --name "$CLAUDE_SANDBOX_NAME" \
+      --from claude-sandbox:local \
+      --policy /policy/claude-policy.yaml \
+      --provider claude-subscription \
+      --detach \
+      -- sleep infinity </dev/null
+  fi
+  # The token does not tell Claude Code the plan (label, default model), so it goes in Claude's
+  # settings, in new and existing sandboxes alike.
+  openshell sandbox exec "$CLAUDE_SANDBOX_NAME" -- python3 -c '
+import json, os, sys
+path = os.path.expanduser("~/.claude/settings.json")
+settings = json.load(open(path)) if os.path.exists(path) else {}
+env = settings.setdefault("env", {})
+if sys.argv[1]:
+    env["CLAUDE_CODE_SUBSCRIPTION_TYPE"] = sys.argv[1]
+else:
+    env.pop("CLAUDE_CODE_SUBSCRIPTION_TYPE", None)
+json.dump(settings, open(path, "w"), indent=2)' "${CLAUDE_PLAN:-}" </dev/null
 }
 
 for agent in $(echo "$AGENTS" | tr ',' ' '); do
